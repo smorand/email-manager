@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"time"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -16,7 +19,7 @@ import (
 
 const (
 	credentialsFile = "google_credentials.json"
-	tokenFile       = "google_token.json"
+	tokenFile       = "token_gmail.json"
 )
 
 var scopes = []string{
@@ -76,21 +79,93 @@ func getGmailService(ctx context.Context) (*gmail.Service, error) {
 }
 
 func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to the following link in your browser:\n%v\n\n", authURL)
-	fmt.Printf("Enter authorization code: ")
+	// Use localhost with configured port
+	config.RedirectURL = "http://localhost:8080/oauth2callback"
 
-	var authCode string
-	if _, err := fmt.Scan(&authCode); err != nil {
-		return nil, fmt.Errorf("unable to read authorization code: %w", err)
+	// Create channels for communication
+	codeChan := make(chan string)
+	errChan := make(chan error)
+
+	// Start local HTTP server
+	server := &http.Server{Addr: ":8080"}
+	http.HandleFunc("/oauth2callback", func(w http.ResponseWriter, r *http.Request) {
+		code := r.URL.Query().Get("code")
+		if code == "" {
+			errChan <- fmt.Errorf("no code in callback")
+			return
+		}
+
+		// Send success message to browser
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprintf(w, `
+			<html>
+			<body>
+				<h1>Authentication successful!</h1>
+				<p>You can close this window and return to the terminal.</p>
+			</body>
+			</html>
+		`)
+
+		codeChan <- code
+	})
+
+	// Start server in background
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			// Ignore server closed error
+			if err != http.ErrServerClosed {
+				errChan <- err
+			}
+		}
+	}()
+
+	// Wait a moment for server to start
+	time.Sleep(100 * time.Millisecond)
+
+	// Generate auth URL
+	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+	fmt.Printf("Opening browser for authentication...\n")
+	fmt.Printf("If browser doesn't open, visit:\n%v\n\n", authURL)
+
+	// Try to open browser automatically
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", authURL)
+	case "linux":
+		cmd = exec.Command("xdg-open", authURL)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", authURL)
 	}
 
-	token, err := config.Exchange(context.TODO(), authCode)
+	if cmd != nil {
+		_ = cmd.Start()
+	}
+
+	// Wait for auth code or error
+	var code string
+	select {
+	case code = <-codeChan:
+		// Success
+	case err := <-errChan:
+		return nil, err
+	case <-time.After(3 * time.Minute):
+		return nil, fmt.Errorf("authentication timeout after 3 minutes")
+	}
+
+	// Shutdown server
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = server.Shutdown(ctx)
+
+	// Exchange code for token
+	tok, err := config.Exchange(context.Background(), code)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve token from web: %w", err)
 	}
 
-	return token, nil
+	fmt.Println("\nAuthentication successful!")
+	return tok, nil
 }
 
 func tokenFromFile(file string) (*oauth2.Token, error) {
