@@ -14,7 +14,7 @@ A command-line interface (CLI) tool for managing Gmail emails using the Gmail AP
 
 ## Prerequisites
 
-- Go 1.21 or higher
+- Go 1.25 or higher
 - Google Cloud Project with Gmail API enabled
 - OAuth2 credentials (credentials.json)
 
@@ -24,6 +24,12 @@ A command-line interface (CLI) tool for managing Gmail emails using the Gmail AP
 
 ```bash
 make build
+```
+
+### Build for all platforms
+
+```bash
+make build-all
 ```
 
 ### Install to system
@@ -171,15 +177,22 @@ make rebuild
 
 ```
 email-manager/
-├── src/
-│   ├── main.go      # Main entry point and command registration
-│   ├── cli.go       # CLI command implementations
-│   ├── auth.go      # OAuth2 authentication logic
-│   ├── go.mod       # Go module dependencies
-│   └── go.sum       # Dependency checksums
-├── Makefile         # Build automation
-├── README.md        # This file
-└── CLAUDE.md        # AI-oriented documentation
+├── go.mod                    # Go module dependencies
+├── go.sum                    # Dependency checksums
+├── Makefile                  # Build automation
+├── README.md                 # This file
+├── CLAUDE.md                 # AI-oriented documentation
+├── cmd/
+│   └── email-manager/
+│       └── main.go           # Entry point
+├── internal/
+│   ├── cli/
+│   │   └── cli.go            # CLI command implementations
+│   └── gmail/
+│       └── service.go        # Gmail API service
+└── pkg/
+    └── auth/
+        └── auth.go           # OAuth2 authentication
 ```
 
 ## License
