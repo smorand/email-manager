@@ -52,11 +52,24 @@ make uninstall
 
 ## Setup
 
-1. Create a Google Cloud Project and enable Gmail API
+1. Create a Google Cloud Project and enable Gmail API and People API
 2. Create OAuth2 credentials (Desktop application)
 3. Download the credentials and save to `~/.credentials/google_credentials.json`
 4. Run any command - you'll be prompted to authorize the application
 5. The token will be saved to `~/.credentials/google_token.json`
+
+### Credential Sharing with google-contacts
+
+This application shares OAuth credentials with the `google-contacts` project. Both applications use:
+- Same credentials file: `~/.credentials/google_credentials.json`
+- Same token file: `~/.credentials/google_token.json`
+- Combined scopes: Gmail API + People API
+
+This means you only need to authorize once for both applications. If you add new scopes or encounter permission errors, delete the token file to re-authorize:
+
+```bash
+rm ~/.credentials/google_token.json
+```
 
 ## Usage
 
