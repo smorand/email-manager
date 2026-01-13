@@ -85,6 +85,26 @@ The `pkg/auth/auth.go` package is designed to be **duplicated** (not shared as a
 
 This enables users to authorize once and use both applications.
 
+### Unified OAuth2 Scopes
+
+The auth package includes ALL scopes for both applications:
+
+```go
+// Gmail API scopes (for email-manager)
+gmail.GmailModifyScope
+gmail.GmailSendScope
+gmail.GmailLabelsScope
+
+// People API scopes (for google-contacts)
+people.ContactsScope
+people.ContactsOtherReadonlyScope
+```
+
+**Important**: Adding new scopes requires re-authorization. Delete the token file to force re-auth:
+```bash
+rm ~/.credentials/google_token.json
+```
+
 ## Helper Functions (internal/gmail/service.go)
 
 ```go
@@ -183,7 +203,7 @@ pkg/
 - [x] Create CLAUDE.md
 - [ ] Add unit tests
 - [ ] Add integration tests
-- [ ] Add People API scopes for unified credentials (US-00002)
+- [x] Add People API scopes for unified credentials (US-00002)
 
 ## Notes for AI
 

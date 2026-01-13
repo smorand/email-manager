@@ -16,7 +16,8 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-	"google.golang.org/api/gmail/v1"
+	gmail "google.golang.org/api/gmail/v1"
+	people "google.golang.org/api/people/v1"
 )
 
 const (
@@ -26,11 +27,17 @@ const (
 	TokenFile = "google_token.json"
 )
 
-// Scopes contains all OAuth2 scopes for Gmail API.
+// Scopes contains all OAuth2 scopes for Gmail and People APIs.
+// These unified scopes enable a single OAuth consent for both email-manager
+// and google-contacts applications, using the same token file.
 var Scopes = []string{
+	// Gmail API scopes (for email-manager)
 	gmail.GmailModifyScope,
 	gmail.GmailSendScope,
 	gmail.GmailLabelsScope,
+	// People API scopes (for google-contacts)
+	people.ContactsScope,
+	people.ContactsOtherReadonlyScope,
 }
 
 // GetCredentialsPath returns the path to the credentials directory.
