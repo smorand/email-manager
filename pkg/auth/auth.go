@@ -1,4 +1,7 @@
-package main
+// Package auth provides OAuth2 authentication for Google APIs.
+// This package contains unified scopes for both Gmail and People APIs,
+// enabling a single OAuth consent for multiple applications.
+package auth
 
 import (
 	"context"
@@ -14,21 +17,24 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/gmail/v1"
-	"google.golang.org/api/option"
 )
 
 const (
-	credentialsFile = "google_credentials.json"
-	tokenFile       = "token_gmail.json"
+	// CredentialsFile is the name of the OAuth credentials file.
+	CredentialsFile = "google_credentials.json"
+	// TokenFile is the name of the token file.
+	TokenFile = "google_token.json"
 )
 
-var scopes = []string{
+// Scopes contains all OAuth2 scopes for Gmail API.
+var Scopes = []string{
 	gmail.GmailModifyScope,
 	gmail.GmailSendScope,
 	gmail.GmailLabelsScope,
 }
 
-func getCredentialsPath() string {
+// GetCredentialsPath returns the path to the credentials directory.
+func GetCredentialsPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
@@ -36,16 +42,17 @@ func getCredentialsPath() string {
 	return filepath.Join(home, ".credentials")
 }
 
-func getClient(ctx context.Context) (*http.Client, error) {
-	credPath := filepath.Join(getCredentialsPath(), credentialsFile)
-	tokenPath := filepath.Join(getCredentialsPath(), tokenFile)
+// GetClient returns an HTTP client with OAuth2 authentication.
+func GetClient(ctx context.Context) (*http.Client, error) {
+	credPath := filepath.Join(GetCredentialsPath(), CredentialsFile)
+	tokenPath := filepath.Join(GetCredentialsPath(), TokenFile)
 
 	b, err := os.ReadFile(credPath)
 	if err != nil {
 		return nil, fmt.Errorf("unable to read credentials file %s: %w", credPath, err)
 	}
 
-	config, err := google.ConfigFromJSON(b, scopes...)
+	config, err := google.ConfigFromJSON(b, Scopes...)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse credentials: %w", err)
 	}
@@ -62,20 +69,6 @@ func getClient(ctx context.Context) (*http.Client, error) {
 	}
 
 	return config.Client(ctx, token), nil
-}
-
-func getGmailService(ctx context.Context) (*gmail.Service, error) {
-	client, err := getClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	service, err := gmail.NewService(ctx, option.WithHTTPClient(client))
-	if err != nil {
-		return nil, fmt.Errorf("unable to create Gmail service: %w", err)
-	}
-
-	return service, nil
 }
 
 func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {

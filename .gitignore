@@ -1,5 +1,6 @@
 # Binaries
-email-manager
+/email-manager
+bin/
 
 # Go
 *.exe

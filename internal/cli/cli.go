@@ -1,4 +1,5 @@
-package main
+// Package cli provides the command-line interface for email-manager.
+package cli
 
 import (
 	"context"
@@ -7,9 +8,11 @@ import (
 	"os"
 	"strings"
 
+	"email-manager/internal/gmail"
+
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
-	"google.golang.org/api/gmail/v1"
+	gmailapi "google.golang.org/api/gmail/v1"
 )
 
 // Color functions
@@ -32,8 +35,14 @@ var (
 	to          string
 )
 
-// Command definitions
+// RootCmd is the root command for the CLI.
+var RootCmd = &cobra.Command{
+	Use:   "email-manager",
+	Short: "Gmail Manager - Manage Gmail emails",
+	Long:  "Send, receive, search, and manage Gmail emails using Gmail API v1",
+}
 
+// Command definitions
 var (
 	applyLabelCmd = &cobra.Command{
 		Use:   "apply <message-id> <label-id>",
@@ -122,6 +131,28 @@ var (
 	}
 )
 
+// Init initializes the CLI commands and flags.
+func Init() {
+	// Setup command flags
+	setupSendFlags()
+	setupListFlags()
+	setupSearchFlags()
+	setupDownloadAttachmentsFlags()
+	setupLabelCommands()
+
+	// Register all commands
+	RootCmd.AddCommand(sendCmd)
+	RootCmd.AddCommand(listCmd)
+	RootCmd.AddCommand(getCmd)
+	RootCmd.AddCommand(searchCmd)
+	RootCmd.AddCommand(readCmd)
+	RootCmd.AddCommand(unreadCmd)
+	RootCmd.AddCommand(archiveCmd)
+	RootCmd.AddCommand(deleteCmd)
+	RootCmd.AddCommand(downloadAttachmentsCmd)
+	RootCmd.AddCommand(labelsCmd)
+}
+
 // Setup functions
 
 func setupDownloadAttachmentsFlags() {
@@ -159,12 +190,12 @@ func setupSendFlags() {
 
 func runApplyLabel(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
 
-	req := &gmail.ModifyMessageRequest{
+	req := &gmailapi.ModifyMessageRequest{
 		AddLabelIds: []string{args[1]},
 	}
 
@@ -173,18 +204,18 @@ func runApplyLabel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error applying label: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Label applied\n")
+	fmt.Fprintf(os.Stderr, "Label applied\n")
 	return nil
 }
 
 func runArchive(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
 
-	req := &gmail.ModifyMessageRequest{
+	req := &gmailapi.ModifyMessageRequest{
 		RemoveLabelIds: []string{"INBOX"},
 	}
 
@@ -193,18 +224,18 @@ func runArchive(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error archiving: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Message archived\n")
+	fmt.Fprintf(os.Stderr, "Message archived\n")
 	return nil
 }
 
 func runCreateLabel(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
 
-	label := &gmail.Label{
+	label := &gmailapi.Label{
 		Name: args[0],
 	}
 
@@ -213,13 +244,13 @@ func runCreateLabel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error creating label: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Label created: %s (ID: %s)\n", result.Name, result.Id)
+	fmt.Fprintf(os.Stderr, "Label created: %s (ID: %s)\n", result.Name, result.Id)
 	return nil
 }
 
 func runDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
@@ -229,13 +260,13 @@ func runDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error deleting: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Message deleted\n")
+	fmt.Fprintf(os.Stderr, "Message deleted\n")
 	return nil
 }
 
 func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
@@ -249,13 +280,9 @@ func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 	}
 
 	// Expand tilde in download directory
-	dir := os.ExpandEnv(downloadDir)
-	if strings.HasPrefix(dir, "~/") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("error getting home directory: %w", err)
-		}
-		dir = strings.Replace(dir, "~", home, 1)
+	dir, err := gmail.ExpandTilde(downloadDir)
+	if err != nil {
+		return err
 	}
 
 	// Create download directory if it doesn't exist
@@ -265,7 +292,7 @@ func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 
 	// Process attachments
 	attachmentCount := 0
-	if err := processAttachments(service, messageID, msg.Payload, dir, &attachmentCount); err != nil {
+	if err := gmail.ProcessAttachments(service, messageID, msg.Payload, dir, &attachmentCount); err != nil {
 		return err
 	}
 
@@ -274,13 +301,13 @@ func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Downloaded %d attachment(s) to %s\n", attachmentCount, dir)
+	fmt.Fprintf(os.Stderr, "Downloaded %d attachment(s) to %s\n", attachmentCount, dir)
 	return nil
 }
 
 func runGet(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
@@ -299,7 +326,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 
 	// Print body
 	fmt.Println("\n" + strings.Repeat("=", 80))
-	body := getBody(msg.Payload)
+	body := gmail.GetBody(msg.Payload)
 	fmt.Println(body)
 
 	return nil
@@ -307,7 +334,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 
 func runList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
@@ -322,12 +349,12 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error listing messages: %w", err)
 	}
 
-	return listMessagesWithDetails(service, response.Messages)
+	return gmail.ListMessagesWithDetails(service, response.Messages)
 }
 
 func runListLabels(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
@@ -346,12 +373,12 @@ func runListLabels(cmd *cobra.Command, args []string) error {
 
 func runRead(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
 
-	req := &gmail.ModifyMessageRequest{
+	req := &gmailapi.ModifyMessageRequest{
 		RemoveLabelIds: []string{"UNREAD"},
 	}
 
@@ -360,13 +387,13 @@ func runRead(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error marking as read: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Message marked as read\n")
+	fmt.Fprintf(os.Stderr, "Message marked as read\n")
 	return nil
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
@@ -378,12 +405,12 @@ func runSearch(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Found %d messages\n\n", len(response.Messages))
 
-	return listMessagesWithDetails(service, response.Messages)
+	return gmail.ListMessagesWithDetails(service, response.Messages)
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
@@ -402,7 +429,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	raw := base64.URLEncoding.EncodeToString([]byte(message.String()))
 
-	msg := &gmail.Message{
+	msg := &gmailapi.Message{
 		Raw: raw,
 	}
 
@@ -411,18 +438,18 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error sending email: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Email sent successfully to %s\n", to)
+	fmt.Fprintf(os.Stderr, "Email sent successfully to %s\n", to)
 	return nil
 }
 
 func runUnread(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := getGmailService(ctx)
+	service, err := gmail.GetService(ctx)
 	if err != nil {
 		return err
 	}
 
-	req := &gmail.ModifyMessageRequest{
+	req := &gmailapi.ModifyMessageRequest{
 		AddLabelIds: []string{"UNREAD"},
 	}
 
@@ -431,100 +458,11 @@ func runUnread(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error marking as unread: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "✅ Message marked as unread\n")
+	fmt.Fprintf(os.Stderr, "Message marked as unread\n")
 	return nil
 }
 
-// Helper functions (alphabetically ordered)
-
-func extractHeaders(headers []*gmail.MessagePartHeader) (subject, from string) {
-	for _, header := range headers {
-		switch header.Name {
-		case "Subject":
-			subject = header.Value
-		case "From":
-			from = header.Value
-		}
-	}
-	return
-}
-
-func getBody(part *gmail.MessagePart) string {
-	if part.Body != nil && part.Body.Data != "" {
-		data, err := base64.URLEncoding.DecodeString(part.Body.Data)
-		if err == nil {
-			return string(data)
-		}
-	}
-
-	for _, p := range part.Parts {
-		if p.MimeType == "text/plain" {
-			if p.Body != nil && p.Body.Data != "" {
-				data, err := base64.URLEncoding.DecodeString(p.Body.Data)
-				if err == nil {
-					return string(data)
-				}
-			}
-		}
-	}
-
-	return "[No text content]"
-}
-
-func listMessagesWithDetails(service *gmail.Service, messages []*gmail.Message) error {
-	for _, msg := range messages {
-		fullMsg, err := service.Users.Messages.Get("me", msg.Id).Do()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to get message %s: %v\n", msg.Id, err)
-			continue
-		}
-
-		subject, from := extractHeaders(fullMsg.Payload.Headers)
-		fmt.Printf("ID: %s\n", msg.Id)
-		fmt.Printf("From: %s\n", from)
-		fmt.Printf("Subject: %s\n", subject)
-		fmt.Println("---")
-	}
-	return nil
-}
-
-func processAttachments(service *gmail.Service, messageID string, part *gmail.MessagePart, dir string, count *int) error {
-	// Check if this part has a filename (is an attachment)
-	if part.Filename != "" && part.Body != nil {
-		attachmentID := part.Body.AttachmentId
-
-		if attachmentID != "" {
-			// Download the attachment
-			fmt.Fprintf(os.Stderr, "Downloading: %s\n", part.Filename)
-
-			attachment, err := service.Users.Messages.Attachments.Get("me", messageID, attachmentID).Do()
-			if err != nil {
-				return fmt.Errorf("error downloading attachment %s: %w", part.Filename, err)
-			}
-
-			// Decode the attachment data
-			data, err := base64.URLEncoding.DecodeString(attachment.Data)
-			if err != nil {
-				return fmt.Errorf("error decoding attachment %s: %w", part.Filename, err)
-			}
-
-			// Write to file
-			filepath := fmt.Sprintf("%s/%s", dir, part.Filename)
-			if err := os.WriteFile(filepath, data, 0644); err != nil {
-				return fmt.Errorf("error writing file %s: %w", filepath, err)
-			}
-
-			fmt.Fprintf(os.Stderr, "Saved: %s\n", filepath)
-			*count++
-		}
-	}
-
-	// Recursively process parts
-	for _, subPart := range part.Parts {
-		if err := processAttachments(service, messageID, subPart, dir, count); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
+// Suppress unused variable warnings for color functions
+var _ = cyan
+var _ = green
+var _ = red

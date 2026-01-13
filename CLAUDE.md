@@ -3,18 +3,43 @@
 ## Project Overview
 
 **Type**: CLI Application
-**Language**: Go 1.21+
+**Language**: Go 1.25+
 **Purpose**: Gmail management via Gmail API v1
 **Authentication**: OAuth2 with Google
 **CLI Framework**: Cobra
 
+## Project Structure
+
+Following golang skill conventions:
+
+```
+email-manager/
+├── go.mod                    # Module at root
+├── go.sum
+├── Makefile                  # Build automation
+├── README.md                 # User documentation
+├── CLAUDE.md                 # AI development guide
+├── cmd/
+│   └── email-manager/
+│       └── main.go           # Entry point (minimal)
+├── internal/
+│   ├── cli/
+│   │   └── cli.go            # CLI commands and flags
+│   └── gmail/
+│       └── service.go        # Gmail API service and helpers
+└── pkg/
+    └── auth/
+        └── auth.go           # OAuth2 authentication (shared with google-contacts)
+```
+
 ## Architecture
 
-### Core Components
+### Core Packages
 
-1. **main.go** - Entry point, command registration
-2. **cli.go** - Command implementations (send, list, get, search, read, unread, archive, delete, download-attachments, labels)
-3. **auth.go** - OAuth2 authentication and Gmail service initialization
+1. **cmd/email-manager/main.go** - Minimal entry point, initializes CLI and executes
+2. **internal/cli/cli.go** - Command definitions, flag setup, command handlers
+3. **internal/gmail/service.go** - Gmail API service wrapper and helper functions
+4. **pkg/auth/auth.go** - OAuth2 authentication (designed to be duplicated to google-contacts)
 
 ### Command Structure
 
@@ -50,61 +75,42 @@ email-manager
 4. Saves token for future use
 5. Creates Gmail service with authenticated HTTP client
 
-## Compliance Status
+## Credential Sharing Strategy
 
-### ✅ All Critical Issues Resolved
+The `pkg/auth/auth.go` package is designed to be **duplicated** (not shared as a library) to the `google-contacts` project. Both applications will:
 
-The codebase is now fully compliant with Go coding standards:
+- Use the same token file: `~/.credentials/google_token.json`
+- Use the same credentials file: `~/.credentials/google_credentials.json`
+- Have the same scopes (Gmail + People API) for unified OAuth consent
 
-1. **✅ Code Duplication Eliminated**
-   - Extracted `extractHeaders()` helper function
-   - Extracted `listMessagesWithDetails()` for common message listing logic
-   - Both `runList()` and `runSearch()` now use shared helper
+This enables users to authorize once and use both applications.
 
-2. **✅ init() Functions Removed**
-   - Replaced with explicit setup functions: `setupSendFlags()`, `setupListFlags()`, `setupSearchFlags()`, `setupLabelCommands()`
-   - All setup called explicitly in `main()`
-
-3. **✅ Error Handling Improved**
-   - Silent errors now logged with `fmt.Fprintf(os.Stderr, "Warning: ...")`
-   - Proper error context provided to users
-
-4. **✅ Dead Code Removed**
-   - Deleted unused `printJSON()` function
-
-5. **✅ File Organization Compliant**
-   - Proper ordering: package → imports → constants/vars → command definitions → setup functions → handlers (alphabetical) → helpers (alphabetical)
-   - All functions and variables alphabetically ordered within their sections
-
-6. **✅ Context Usage**
-   - Using `context.Background()` is acceptable for CLI tools
-   - Each command handler creates its own context as needed
-
-## Code Structure
-
-### Helper Functions
-
-The codebase uses the following helper functions to eliminate duplication:
+## Helper Functions (internal/gmail/service.go)
 
 ```go
-// extractHeaders - Extracts subject and from headers from message
-func extractHeaders(headers []*gmail.MessagePartHeader) (subject, from string)
+// GetService - Returns Gmail API service instance
+func GetService(ctx context.Context) (*gmail.Service, error)
 
-// listMessagesWithDetails - Lists messages with full details (from, subject)
-func listMessagesWithDetails(service *gmail.Service, messages []*gmail.Message) error
+// ExtractHeaders - Extracts subject and from headers from message
+func ExtractHeaders(headers []*gmail.MessagePartHeader) (subject, from string)
 
-// getBody - Extracts text body from message payload
-func getBody(part *gmail.MessagePart) string
+// GetBody - Extracts text body from message payload
+func GetBody(part *gmail.MessagePart) string
 
-// processAttachments - Recursively processes message parts to download attachments
-func processAttachments(service *gmail.Service, messageID string, part *gmail.MessagePart, dir string, count *int) error
+// ListMessagesWithDetails - Lists messages with full details (from, subject)
+func ListMessagesWithDetails(service *gmail.Service, messages []*gmail.Message) error
+
+// ProcessAttachments - Recursively processes message parts to download attachments
+func ProcessAttachments(service *gmail.Service, messageID string, part *gmail.MessagePart, dir string, count *int) error
+
+// ExpandTilde - Expands ~ to user's home directory
+func ExpandTilde(path string) (string, error)
 ```
 
-### Setup Functions
-
-All command configuration is done through explicit setup functions:
+## CLI Setup Functions (internal/cli/cli.go)
 
 ```go
+func Init()                          // Initializes all commands and flags
 func setupSendFlags()                // Configures send command flags
 func setupListFlags()                // Configures list command flags
 func setupSearchFlags()              // Configures search command flags
@@ -117,7 +123,8 @@ func setupLabelCommands()            // Registers label subcommands
 ### Build and Test
 
 ```bash
-make build      # Build binary
+make build      # Build binary for current platform
+make build-all  # Build for all platforms
 make test       # Run tests
 make fmt        # Format code
 make vet        # Run linter
@@ -134,57 +141,49 @@ make uninstall  # Remove from system
 ### Common Tasks
 
 **Add new command**:
-1. Create command variable in `cli.go`
+1. Create command variable in `internal/cli/cli.go`
 2. Implement `RunE` function
-3. Register in `main.go` with `rootCmd.AddCommand()`
+3. Register in `Init()` function with `RootCmd.AddCommand()`
 
 **Add OAuth scope**:
-1. Update `scopes` slice in `auth.go`
+1. Update `Scopes` slice in `pkg/auth/auth.go`
 2. Delete existing token to re-authenticate
 
 ## File Locations
 
 - **Credentials**: `~/.credentials/google_credentials.json`
 - **Token**: `~/.credentials/google_token.json`
-- **Binary**: `/usr/local/bin/email-manager` (after install)
+- **Binary**: `bin/email-manager-<os>-<arch>` (after build)
+- **Installed**: `/usr/local/bin/email-manager` (after install)
 
 ## Testing
 
-Currently no tests implemented. Recommended test structure:
+Recommended test structure:
 
 ```
-src/
-├── main_test.go
-├── cli_test.go
-└── auth_test.go
+internal/
+├── cli/
+│   └── cli_test.go
+└── gmail/
+    └── service_test.go
+pkg/
+└── auth/
+    └── auth_test.go
 ```
-
-## Future Improvements
-
-1. Add unit tests for all commands
-2. Implement attachment support in send command (upload)
-3. Add batch operations (bulk read/archive/delete)
-4. Add configuration file support (~/.email-manager.yaml)
-5. Implement proper logging with levels
-6. Add progress bars for batch operations
-7. Support HTML email bodies
-8. Add draft management commands
-9. List attachments without downloading them
-10. Download specific attachments by index or name
 
 ## Compliance Checklist
 
 - [x] Remove code duplication (extract common functions)
 - [x] Remove `init()` functions
 - [x] Fix silent error handling
-- [x] Remove dead code (`printJSON`)
-- [x] Reorganize file element ordering
-- [x] Improve context usage
+- [x] Remove dead code
+- [x] Reorganize to golang skill structure (cmd/internal/pkg)
 - [x] Create Makefile
 - [x] Create README.md
 - [x] Create CLAUDE.md
 - [ ] Add unit tests
 - [ ] Add integration tests
+- [ ] Add People API scopes for unified credentials (US-00002)
 
 ## Notes for AI
 
@@ -194,3 +193,4 @@ src/
 - Token refresh is handled automatically by oauth2 library
 - Always use proper error wrapping with `%w` format
 - Follow Go coding standards defined in golang skill
+- pkg/auth is designed to be duplicated, not shared as a library
