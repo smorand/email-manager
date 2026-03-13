@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"email-manager/internal/gmail"
+	"email-manager/pkg/auth"
 
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -44,6 +45,12 @@ var RootCmd = &cobra.Command{
 
 // Command definitions
 var (
+	authCmd = &cobra.Command{
+		Use:   "auth",
+		Short: "Authenticate with Gmail (re-authenticate if token expired)",
+		RunE:  runAuth,
+	}
+
 	applyLabelCmd = &cobra.Command{
 		Use:   "apply <message-id> <label-id>",
 		Short: "Apply label to message",
@@ -141,6 +148,7 @@ func Init() {
 	setupLabelCommands()
 
 	// Register all commands
+	RootCmd.AddCommand(authCmd)
 	RootCmd.AddCommand(sendCmd)
 	RootCmd.AddCommand(listCmd)
 	RootCmd.AddCommand(getCmd)
@@ -187,6 +195,33 @@ func setupSendFlags() {
 }
 
 // Command handler functions (alphabetically ordered)
+
+func runAuth(cmd *cobra.Command, args []string) error {
+	// Remove existing token to force re-authentication
+	tokenPath := auth.GetTokenPath()
+	if _, err := os.Stat(tokenPath); err == nil {
+		if err := os.Remove(tokenPath); err != nil {
+			return fmt.Errorf("error removing existing token: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Existing token removed.\n")
+	}
+
+	// Trigger authentication
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	// Verify by getting user profile
+	profile, err := service.Users.GetProfile("me").Do()
+	if err != nil {
+		return fmt.Errorf("error verifying authentication: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Authenticated as: %s\n", profile.EmailAddress)
+	return nil
+}
 
 func runApplyLabel(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()

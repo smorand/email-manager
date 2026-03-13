@@ -53,10 +53,23 @@ make uninstall
 ## Setup
 
 1. Create a Google Cloud Project and enable Gmail API and People API
-2. Create OAuth2 credentials (Desktop application)
-3. Download the credentials and save to `~/.credentials/google_credentials.json`
-4. Run any command - you'll be prompted to authorize the application
-5. The token will be saved to `~/.credentials/google_token.json`
+2. Create OAuth2 credentials (Web application) with redirect URI `http://localhost:8002/oauth2callback`
+3. Download the credentials JSON file
+4. Set the `GOOGLE_CREDENTIALS_FILE` environment variable to point to your credentials file:
+   ```bash
+   export GOOGLE_CREDENTIALS_FILE=~/.credentials/scm-pwd-web.json
+   ```
+   Alternatively, save credentials to the default location: `~/.credentials/google_credentials.json`
+5. Run `email-manager auth` to authenticate via browser
+6. The token will be saved to `~/.credentials/google_token.json`
+
+### Re-authentication
+
+If your token expires, simply run:
+```bash
+email-manager auth
+```
+This removes the old token and opens a browser for fresh authentication.
 
 ### Credential Sharing with google-contacts
 
@@ -72,6 +85,12 @@ rm ~/.credentials/google_token.json
 ```
 
 ## Usage
+
+### Authenticate
+
+```bash
+email-manager auth
+```
 
 ### Send Email
 

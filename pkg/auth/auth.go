@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	// CredentialsFile is the name of the OAuth credentials file.
-	CredentialsFile = "google_credentials.json"
+	// DefaultCredentialsFile is the fallback name of the OAuth credentials file.
+	DefaultCredentialsFile = "google_credentials.json"
 	// TokenFile is the name of the token file.
 	TokenFile = "google_token.json"
 )
@@ -49,10 +49,25 @@ func GetCredentialsPath() string {
 	return filepath.Join(home, ".credentials")
 }
 
+// GetCredentialsFilePath returns the path to the credentials file.
+// It checks the GOOGLE_CREDENTIALS_FILE environment variable first,
+// then falls back to the default location.
+func GetCredentialsFilePath() string {
+	if envPath := os.Getenv("GOOGLE_CREDENTIALS_FILE"); envPath != "" {
+		return envPath
+	}
+	return filepath.Join(GetCredentialsPath(), DefaultCredentialsFile)
+}
+
+// GetTokenPath returns the path to the token file.
+func GetTokenPath() string {
+	return filepath.Join(GetCredentialsPath(), TokenFile)
+}
+
 // GetClient returns an HTTP client with OAuth2 authentication.
 func GetClient(ctx context.Context) (*http.Client, error) {
-	credPath := filepath.Join(GetCredentialsPath(), CredentialsFile)
-	tokenPath := filepath.Join(GetCredentialsPath(), TokenFile)
+	credPath := GetCredentialsFilePath()
+	tokenPath := GetTokenPath()
 
 	b, err := os.ReadFile(credPath)
 	if err != nil {
@@ -79,15 +94,15 @@ func GetClient(ctx context.Context) (*http.Client, error) {
 }
 
 func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
-	// Use localhost with configured port
-	config.RedirectURL = "http://localhost:8080/oauth2callback"
+	// Use localhost with port matching credentials redirect_uris
+	config.RedirectURL = "http://localhost:8002/oauth2callback"
 
 	// Create channels for communication
 	codeChan := make(chan string)
 	errChan := make(chan error)
 
 	// Start local HTTP server
-	server := &http.Server{Addr: ":8080"}
+	server := &http.Server{Addr: ":8002"}
 	http.HandleFunc("/oauth2callback", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		if code == "" {

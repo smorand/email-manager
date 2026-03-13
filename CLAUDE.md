@@ -45,6 +45,7 @@ email-manager/
 
 ```
 email-manager
+├── auth                 # Authenticate / re-authenticate
 ├── send                 # Send emails
 ├── list                 # List messages
 ├── get                  # Get message by ID
@@ -69,11 +70,19 @@ email-manager
 
 ## Authentication Flow
 
-1. Reads credentials from `~/.credentials/google_credentials.json`
-2. Checks for existing token at `~/.credentials/google_token.json`
-3. If no token, initiates OAuth2 flow with browser
+1. Reads credentials from `GOOGLE_CREDENTIALS_FILE` env var (falls back to `~/.credentials/google_credentials.json`)
+2. Checks for existing token at `~/.credentials/token_gmail.json`
+3. If no token, initiates OAuth2 flow with browser on port 8002
 4. Saves token for future use
 5. Creates Gmail service with authenticated HTTP client
+
+### Re-authentication
+
+When the token expires, run:
+```bash
+GOOGLE_CREDENTIALS_FILE=~/.credentials/scm-pwd-web.json email-manager auth
+```
+This removes the existing token and triggers a fresh OAuth2 flow.
 
 ## Credential Sharing Strategy
 
@@ -171,10 +180,10 @@ make uninstall  # Remove from system
 
 ## File Locations
 
-- **Credentials**: `~/.credentials/google_credentials.json`
+- **Credentials**: `GOOGLE_CREDENTIALS_FILE` env var or `~/.credentials/google_credentials.json`
 - **Token**: `~/.credentials/google_token.json`
 - **Binary**: `bin/email-manager-<os>-<arch>` (after build)
-- **Installed**: `/usr/local/bin/email-manager` (after install)
+- **Installed**: `/usr/local/bin/email-manager` (after install) or `~/.claude/skills/email-manager/scripts/email-manager`
 
 ## Testing
 
