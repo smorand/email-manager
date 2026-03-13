@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"mime"
 	"os"
 	"strings"
 
@@ -458,9 +459,12 @@ func runSend(cmd *cobra.Command, args []string) error {
 	if bcc != "" {
 		message.WriteString(fmt.Sprintf("Bcc: %s\r\n", bcc))
 	}
-	message.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	message.WriteString(fmt.Sprintf("Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject)))
+	message.WriteString("MIME-Version: 1.0\r\n")
+	message.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n")
+	message.WriteString("Content-Transfer-Encoding: base64\r\n")
 	message.WriteString("\r\n")
-	message.WriteString(body)
+	message.WriteString(base64.StdEncoding.EncodeToString([]byte(body)))
 
 	raw := base64.URLEncoding.EncodeToString([]byte(message.String()))
 
