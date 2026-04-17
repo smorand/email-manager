@@ -1,9 +1,10 @@
 # Email Manager
 
-A command-line interface (CLI) tool for managing Gmail emails using the Gmail API v1.
+A command-line interface (CLI) tool for managing Gmail emails using the Gmail API v1. Supports multiple Gmail accounts.
 
 ## Features
 
+- Multi-account support: manage multiple Gmail accounts with `--account` flag
 - Send emails with CC, BCC, and attachments
 - List and search messages
 - Mark messages as read/unread
@@ -60,43 +61,78 @@ make uninstall
    export GOOGLE_CREDENTIALS_FILE=~/.credentials/scm-pwd-web.json
    ```
    Alternatively, save credentials to the default location: `~/.credentials/google_credentials.json`
-5. Run `email-manager auth` to authenticate via browser
-6. The token will be saved to `~/.credentials/google_token.json`
+5. Authenticate your Gmail account:
+   ```bash
+   email-manager auth --account user@gmail.com
+   ```
+6. The token will be saved to `~/.cache/email-manager/user@gmail.com.json`
+
+### Multi-account Setup
+
+You can authenticate multiple Gmail accounts:
+
+```bash
+email-manager auth --account personal@gmail.com
+email-manager auth --account work@gmail.com
+```
+
+When only one account is authenticated, it is selected automatically. When multiple accounts are authenticated, use `--account` to specify which one:
+
+```bash
+email-manager list --account personal@gmail.com
+```
+
+List all authenticated accounts:
+
+```bash
+email-manager accounts
+```
 
 ### Re-authentication
 
-If your token expires, simply run:
+If your token expires, re-authenticate the specific account:
 ```bash
-email-manager auth
+email-manager auth --account user@gmail.com
 ```
-This removes the old token and opens a browser for fresh authentication.
+This removes the old token and opens a browser for fresh authentication. The tool verifies that the account you authenticate with matches the `--account` value.
 
 ### Credential Sharing with google-contacts
 
-This application shares OAuth credentials with the `google-contacts` project. Both applications use:
+This application shares OAuth credentials (client_id/secret) with the `google-contacts` project. Both applications use:
 - Same credentials file: `~/.credentials/google_credentials.json`
-- Same token file: `~/.credentials/google_token.json`
 - Combined scopes: Gmail API + People API
 
-This means you only need to authorize once for both applications. If you add new scopes or encounter permission errors, delete the token file to re-authorize:
-
-```bash
-rm ~/.credentials/google_token.json
-```
+Token files are stored per-account in `~/.cache/email-manager/`.
 
 ## Usage
 
 ### Authenticate
 
 ```bash
-email-manager auth
+email-manager auth --account user@gmail.com
+```
+
+### List Authenticated Accounts
+
+```bash
+email-manager accounts
 ```
 
 ### Send Email
 
 ```bash
+# Simple email
 email-manager send --to "recipient@example.com" --subject "Hello" --body "Message content"
+
+# With CC and BCC
 email-manager send --to "recipient@example.com" --subject "Test" --body "Message" --cc "cc@example.com" --bcc "bcc@example.com"
+
+# With attachments
+email-manager send --to "recipient@example.com" --subject "Report" --body "See attached" --attach /path/to/file.pdf
+email-manager send --to "recipient@example.com" --subject "Files" --body "Multiple files" --attach file1.pdf --attach file2.png
+
+# With specific account
+email-manager send --account work@gmail.com --to "recipient@example.com" --subject "Hello" --body "Message"
 ```
 
 ### List Messages
@@ -213,7 +249,7 @@ email-manager/
 ├── go.sum                    # Dependency checksums
 ├── Makefile                  # Build automation
 ├── README.md                 # This file
-├── CLAUDE.md                 # AI-oriented documentation
+├── CLAUDE.md                 # AI development guide
 ├── cmd/
 │   └── email-manager/
 │       └── main.go           # Entry point
@@ -221,11 +257,18 @@ email-manager/
 │   ├── cli/
 │   │   └── cli.go            # CLI command implementations
 │   └── gmail/
+│       ├── compose.go        # Email composition (plain and multipart MIME)
 │       └── service.go        # Gmail API service
 └── pkg/
     └── auth/
-        └── auth.go           # OAuth2 authentication
+        └── auth.go           # OAuth2 authentication (multi-account)
 ```
+
+## File Locations
+
+- **Credentials**: `GOOGLE_CREDENTIALS_FILE` env var or `~/.credentials/google_credentials.json`
+- **Tokens**: `~/.cache/email-manager/<account>.json` (one per account)
+- **Binary**: `bin/email-manager-<os>-<arch>` (after build)
 
 ## License
 
@@ -233,4 +276,4 @@ Private project for internal use.
 
 ## Author
 
-Sebastien MORAND (sebastien.morand@*******)
+Sebastien MORAND (seb.morand@gmail.com)

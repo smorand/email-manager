@@ -4,8 +4,8 @@
 
 **Type**: CLI Application
 **Language**: Go 1.25+
-**Purpose**: Gmail management via Gmail API v1
-**Authentication**: OAuth2 with Google
+**Purpose**: Gmail management via Gmail API v1 (multi-account)
+**Authentication**: OAuth2 with Google (per-account tokens)
 **CLI Framework**: Cobra
 
 ## Project Structure
@@ -24,29 +24,32 @@ email-manager/
 │       └── main.go           # Entry point (minimal)
 ├── internal/
 │   ├── cli/
-│   │   └── cli.go            # CLI commands and flags
+│   │   └── cli.go            # CLI commands, flags, multi-account logic
 │   └── gmail/
+│       ├── compose.go        # Email composition (plain text and multipart MIME)
 │       └── service.go        # Gmail API service and helpers
 └── pkg/
     └── auth/
-        └── auth.go           # OAuth2 authentication (shared with google-contacts)
+        └── auth.go           # OAuth2 authentication (multi-account, shared with google-contacts)
 ```
 
 ## Architecture
 
 ### Core Packages
 
-1. **cmd/email-manager/main.go** - Minimal entry point, initializes CLI and executes
-2. **internal/cli/cli.go** - Command definitions, flag setup, command handlers
-3. **internal/gmail/service.go** - Gmail API service wrapper and helper functions
-4. **pkg/auth/auth.go** - OAuth2 authentication (designed to be duplicated to google-contacts)
+1. **cmd/email-manager/main.go** : Minimal entry point, initializes CLI and executes
+2. **internal/cli/cli.go** : Command definitions, flag setup, command handlers, account resolution
+3. **internal/gmail/compose.go** : Email message composition (BuildPlainMessage, BuildMessageWithAttachments)
+4. **internal/gmail/service.go** : Gmail API service wrapper and helper functions
+5. **pkg/auth/auth.go** : OAuth2 authentication with multi-account token storage (designed to be duplicated to google-contacts)
 
 ### Command Structure
 
 ```
-email-manager
-├── auth                 # Authenticate / re-authenticate
-├── send                 # Send emails
+email-manager [--account <email>]
+├── accounts             # List authenticated accounts
+├── auth --account <email> # Authenticate / re-authenticate a specific account
+├── send                 # Send emails (with attachment support)
 ├── list                 # List messages
 ├── get                  # Get message by ID
 ├── search               # Search messages
@@ -61,38 +64,45 @@ email-manager
     └── apply            # Apply label to message
 ```
 
+### Multi-account Logic
+
+- `--account` is a persistent flag on the root command
+- `auth` command: `--account` is required, verifies that the OAuth authenticated email matches
+- `accounts` command: no account resolution needed
+- All other commands: auto-resolves when only one account exists, requires `--account` when multiple accounts exist
+- Account resolution happens in `PersistentPreRunE` on the root command
+
 ## Key Dependencies
 
-- `github.com/spf13/cobra` - CLI framework
-- `google.golang.org/api/gmail/v1` - Gmail API client
-- `golang.org/x/oauth2` - OAuth2 authentication
-- `github.com/fatih/color` - Terminal colors
+- `github.com/spf13/cobra` : CLI framework
+- `google.golang.org/api/gmail/v1` : Gmail API client
+- `golang.org/x/oauth2` : OAuth2 authentication
+- `github.com/fatih/color` : Terminal colors
 
 ## Authentication Flow
 
 1. Reads credentials from `GOOGLE_CREDENTIALS_FILE` env var (falls back to `~/.credentials/google_credentials.json`)
-2. Checks for existing token at `~/.credentials/token_gmail.json`
+2. Checks for existing token at `~/.cache/email-manager/<account>.json`
 3. If no token, initiates OAuth2 flow with browser on port 8002
-4. Saves token for future use
-5. Creates Gmail service with authenticated HTTP client
+4. Verifies authenticated email matches `--account` parameter (Inconsistent Authentication error if mismatch)
+5. Saves token for future use
+6. Creates Gmail service with authenticated HTTP client
 
 ### Re-authentication
 
 When the token expires, run:
 ```bash
-GOOGLE_CREDENTIALS_FILE=~/.credentials/scm-pwd-web.json email-manager auth
+email-manager auth --account user@gmail.com
 ```
 This removes the existing token and triggers a fresh OAuth2 flow.
 
 ## Credential Sharing Strategy
 
-The `pkg/auth/auth.go` package is designed to be **duplicated** (not shared as a library) to the `google-contacts` project. Both applications will:
+The `pkg/auth/auth.go` package is designed to be **duplicated** (not shared as a library) to the `google-contacts` project. Both applications:
 
-- Use the same token file: `~/.credentials/google_token.json`
 - Use the same credentials file: `~/.credentials/google_credentials.json`
 - Have the same scopes (Gmail + People API) for unified OAuth consent
-
-This enables users to authorize once and use both applications.
+- Store tokens per-account in `~/.cache/email-manager/`
 
 ### Unified OAuth2 Scopes
 
@@ -109,42 +119,38 @@ people.ContactsScope
 people.ContactsOtherReadonlyScope
 ```
 
-**Important**: Adding new scopes requires re-authorization. Delete the token file to force re-auth:
+**Important**: Adding new scopes requires re-authorization per account:
 ```bash
-rm ~/.credentials/google_token.json
+email-manager auth --account user@gmail.com
 ```
 
 ## Helper Functions (internal/gmail/service.go)
 
 ```go
-// GetService - Returns Gmail API service instance
-func GetService(ctx context.Context) (*gmail.Service, error)
-
-// ExtractHeaders - Extracts subject and from headers from message
+func GetService(ctx context.Context, account string) (*gmail.Service, error)
 func ExtractHeaders(headers []*gmail.MessagePartHeader) (subject, from string)
-
-// GetBody - Extracts text body from message payload
 func GetBody(part *gmail.MessagePart) string
-
-// ListMessagesWithDetails - Lists messages with full details (from, subject)
 func ListMessagesWithDetails(service *gmail.Service, messages []*gmail.Message) error
-
-// ProcessAttachments - Recursively processes message parts to download attachments
 func ProcessAttachments(service *gmail.Service, messageID string, part *gmail.MessagePart, dir string, count *int) error
-
-// ExpandTilde - Expands ~ to user's home directory
 func ExpandTilde(path string) (string, error)
 ```
 
-## CLI Setup Functions (internal/cli/cli.go)
+## Compose Functions (internal/gmail/compose.go)
 
 ```go
-func Init()                          // Initializes all commands and flags
-func setupSendFlags()                // Configures send command flags
-func setupListFlags()                // Configures list command flags
-func setupSearchFlags()              // Configures search command flags
-func setupDownloadAttachmentsFlags() // Configures download-attachments flags
-func setupLabelCommands()            // Registers label subcommands
+func BuildPlainMessage(to, cc, bcc, subject, body string) string
+func BuildMessageWithAttachments(to, cc, bcc, subject, body string, attachments []string) (string, error)
+```
+
+## Auth Functions (pkg/auth/auth.go)
+
+```go
+func GetClient(ctx context.Context, account string) (*http.Client, error)
+func GetCredentialsFilePath() string
+func GetTokenDir() string                          // ~/.cache/email-manager/
+func GetTokenPathForAccount(account string) string  // ~/.cache/email-manager/<account>.json
+func ListAccounts() ([]string, error)
+func RemoveToken(account string) error
 ```
 
 ## Development Workflow
@@ -173,17 +179,18 @@ make uninstall  # Remove from system
 1. Create command variable in `internal/cli/cli.go`
 2. Implement `RunE` function
 3. Register in `Init()` function with `RootCmd.AddCommand()`
+4. All handlers receive `account` from the resolved global variable
 
 **Add OAuth scope**:
 1. Update `Scopes` slice in `pkg/auth/auth.go`
-2. Delete existing token to re-authenticate
+2. Re-authenticate affected accounts
 
 ## File Locations
 
 - **Credentials**: `GOOGLE_CREDENTIALS_FILE` env var or `~/.credentials/google_credentials.json`
-- **Token**: `~/.credentials/google_token.json`
+- **Tokens**: `~/.cache/email-manager/<account>.json` (one per account)
 - **Binary**: `bin/email-manager-<os>-<arch>` (after build)
-- **Installed**: `/usr/local/bin/email-manager` (after install) or `~/.claude/skills/email-manager/scripts/email-manager`
+- **Installed**: `/usr/local/bin/email-manager` (after install)
 
 ## Testing
 
@@ -194,6 +201,7 @@ internal/
 ├── cli/
 │   └── cli_test.go
 └── gmail/
+    ├── compose_test.go
     └── service_test.go
 pkg/
 └── auth/
@@ -210,16 +218,19 @@ pkg/
 - [x] Create Makefile
 - [x] Create README.md
 - [x] Create CLAUDE.md
+- [x] Add People API scopes for unified credentials
+- [x] Multi-account support via --account flag
+- [x] Functional attachment support in send command
 - [ ] Add unit tests
 - [ ] Add integration tests
-- [x] Add People API scopes for unified credentials (US-00002)
 
 ## Notes for AI
 
 - This is a CLI tool, avoid suggesting web/API frameworks
 - OAuth2 flow requires user browser interaction
-- Gmail API has rate limits - consider batch operations
+- Gmail API has rate limits, consider batch operations
 - Token refresh is handled automatically by oauth2 library
 - Always use proper error wrapping with `%w` format
 - Follow Go coding standards defined in golang skill
 - pkg/auth is designed to be duplicated, not shared as a library
+- The `account` parameter flows: CLI flag -> PersistentPreRunE -> global var -> GetService -> GetClient

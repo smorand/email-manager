@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -23,8 +24,8 @@ import (
 const (
 	// DefaultCredentialsFile is the fallback name of the OAuth credentials file.
 	DefaultCredentialsFile = "google_credentials.json"
-	// TokenFile is the name of the token file.
-	TokenFile = "google_token.json"
+	// TokenDir is the directory name for per-account token files.
+	TokenDir = "email-manager"
 )
 
 // Scopes contains all OAuth2 scopes for Gmail and People APIs.
@@ -59,15 +60,53 @@ func GetCredentialsFilePath() string {
 	return filepath.Join(GetCredentialsPath(), DefaultCredentialsFile)
 }
 
-// GetTokenPath returns the path to the token file.
-func GetTokenPath() string {
-	return filepath.Join(GetCredentialsPath(), TokenFile)
+// GetTokenDir returns the directory for per-account token files.
+func GetTokenDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".cache", TokenDir)
 }
 
-// GetClient returns an HTTP client with OAuth2 authentication.
-func GetClient(ctx context.Context) (*http.Client, error) {
+// GetTokenPathForAccount returns the token file path for a specific account.
+func GetTokenPathForAccount(account string) string {
+	return filepath.Join(GetTokenDir(), account+".json")
+}
+
+// ListAccounts returns all authenticated account email addresses.
+func ListAccounts() ([]string, error) {
+	tokenDir := GetTokenDir()
+	entries, err := os.ReadDir(tokenDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("unable to read token directory: %w", err)
+	}
+	var accounts []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			account := strings.TrimSuffix(entry.Name(), ".json")
+			accounts = append(accounts, account)
+		}
+	}
+	return accounts, nil
+}
+
+// RemoveToken removes the token file for a specific account.
+func RemoveToken(account string) error {
+	tokenPath := GetTokenPathForAccount(account)
+	if _, err := os.Stat(tokenPath); err == nil {
+		return os.Remove(tokenPath)
+	}
+	return nil
+}
+
+// GetClient returns an HTTP client with OAuth2 authentication for the given account.
+func GetClient(ctx context.Context, account string) (*http.Client, error) {
 	credPath := GetCredentialsFilePath()
-	tokenPath := GetTokenPath()
+	tokenPath := GetTokenPathForAccount(account)
 
 	b, err := os.ReadFile(credPath)
 	if err != nil {
@@ -101,9 +140,10 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	codeChan := make(chan string)
 	errChan := make(chan error)
 
-	// Start local HTTP server
-	server := &http.Server{Addr: ":8002"}
-	http.HandleFunc("/oauth2callback", func(w http.ResponseWriter, r *http.Request) {
+	// Start local HTTP server using a dedicated mux to avoid conflicts
+	mux := http.NewServeMux()
+	server := &http.Server{Addr: ":8002", Handler: mux}
+	mux.HandleFunc("/oauth2callback", func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			errChan <- fmt.Errorf("no code in callback")
@@ -127,10 +167,7 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	// Start server in background
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			// Ignore server closed error
-			if err != http.ErrServerClosed {
-				errChan <- err
-			}
+			errChan <- err
 		}
 	}()
 
@@ -169,9 +206,9 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	}
 
 	// Shutdown server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = server.Shutdown(ctx)
+	_ = server.Shutdown(shutdownCtx)
 
 	// Exchange code for token
 	tok, err := config.Exchange(context.Background(), code)

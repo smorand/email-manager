@@ -14,9 +14,9 @@ import (
 	"google.golang.org/api/option"
 )
 
-// GetService returns a Gmail service instance.
-func GetService(ctx context.Context) (*gmail.Service, error) {
-	client, err := auth.GetClient(ctx)
+// GetService returns a Gmail service instance for the given account.
+func GetService(ctx context.Context, account string) (*gmail.Service, error) {
+	client, err := auth.GetClient(ctx, account)
 	if err != nil {
 		return nil, err
 	}

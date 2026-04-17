@@ -3,9 +3,7 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
-	"mime"
 	"os"
 	"strings"
 
@@ -26,6 +24,7 @@ var (
 
 // Command line flags
 var (
+	account     string
 	attach      []string
 	bcc         string
 	body        string
@@ -46,6 +45,12 @@ var RootCmd = &cobra.Command{
 
 // Command definitions
 var (
+	accountsCmd = &cobra.Command{
+		Use:   "accounts",
+		Short: "List authenticated accounts",
+		RunE:  runAccounts,
+	}
+
 	authCmd = &cobra.Command{
 		Use:   "auth",
 		Short: "Authenticate with Gmail (re-authenticate if token expired)",
@@ -139,8 +144,23 @@ var (
 	}
 )
 
+// Commands that skip account resolution
+var skipAccountResolution = map[string]bool{
+	"accounts": true,
+	"help":     true,
+}
+
 // Init initializes the CLI commands and flags.
 func Init() {
+	// Persistent flag for account selection
+	RootCmd.PersistentFlags().StringVar(&account, "account", "", "Gmail account email address")
+
+	// Account resolution logic
+	RootCmd.PersistentPreRunE = resolveAccount
+
+	// Skip account resolution for accounts command
+	accountsCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error { return nil }
+
 	// Setup command flags
 	setupSendFlags()
 	setupListFlags()
@@ -149,6 +169,7 @@ func Init() {
 	setupLabelCommands()
 
 	// Register all commands
+	RootCmd.AddCommand(accountsCmd)
 	RootCmd.AddCommand(authCmd)
 	RootCmd.AddCommand(sendCmd)
 	RootCmd.AddCommand(listCmd)
@@ -160,6 +181,42 @@ func Init() {
 	RootCmd.AddCommand(deleteCmd)
 	RootCmd.AddCommand(downloadAttachmentsCmd)
 	RootCmd.AddCommand(labelsCmd)
+}
+
+func resolveAccount(cmd *cobra.Command, args []string) error {
+	// Skip resolution for commands that don't need an account
+	if skipAccountResolution[cmd.Name()] {
+		return nil
+	}
+
+	// Auth command requires --account explicitly
+	if cmd.Name() == "auth" {
+		if account == "" {
+			return fmt.Errorf("--account flag is required for auth command")
+		}
+		return nil
+	}
+
+	// If account is already set via flag, use it
+	if account != "" {
+		return nil
+	}
+
+	// Auto-resolve: check how many accounts exist
+	accounts, err := auth.ListAccounts()
+	if err != nil {
+		return fmt.Errorf("error listing accounts: %w", err)
+	}
+
+	switch len(accounts) {
+	case 0:
+		return fmt.Errorf("no authenticated accounts found; run 'email-manager auth --account <email>' first")
+	case 1:
+		account = accounts[0]
+		return nil
+	default:
+		return fmt.Errorf("multiple accounts found, specify one with --account: %s", strings.Join(accounts, ", "))
+	}
 }
 
 // Setup functions
@@ -197,19 +254,31 @@ func setupSendFlags() {
 
 // Command handler functions (alphabetically ordered)
 
+func runAccounts(cmd *cobra.Command, args []string) error {
+	accounts, err := auth.ListAccounts()
+	if err != nil {
+		return fmt.Errorf("error listing accounts: %w", err)
+	}
+	if len(accounts) == 0 {
+		fmt.Fprintf(os.Stderr, "No authenticated accounts found.\n")
+		fmt.Fprintf(os.Stderr, "Run 'email-manager auth --account <email>' to authenticate.\n")
+		return nil
+	}
+	for _, a := range accounts {
+		fmt.Println(a)
+	}
+	return nil
+}
+
 func runAuth(cmd *cobra.Command, args []string) error {
 	// Remove existing token to force re-authentication
-	tokenPath := auth.GetTokenPath()
-	if _, err := os.Stat(tokenPath); err == nil {
-		if err := os.Remove(tokenPath); err != nil {
-			return fmt.Errorf("error removing existing token: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Existing token removed.\n")
+	if err := auth.RemoveToken(account); err != nil {
+		return fmt.Errorf("error removing existing token: %w", err)
 	}
 
 	// Trigger authentication
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
@@ -220,13 +289,20 @@ func runAuth(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error verifying authentication: %w", err)
 	}
 
+	// Verify that the authenticated account matches the requested account
+	if !strings.EqualFold(profile.EmailAddress, account) {
+		// Remove the inconsistent token
+		_ = auth.RemoveToken(account)
+		return fmt.Errorf("Inconsistent Authentication: authenticated as %s but expected %s", profile.EmailAddress, account)
+	}
+
 	fmt.Fprintf(os.Stderr, "Authenticated as: %s\n", profile.EmailAddress)
 	return nil
 }
 
 func runApplyLabel(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -246,7 +322,7 @@ func runApplyLabel(cmd *cobra.Command, args []string) error {
 
 func runArchive(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -266,7 +342,7 @@ func runArchive(cmd *cobra.Command, args []string) error {
 
 func runCreateLabel(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -286,7 +362,7 @@ func runCreateLabel(cmd *cobra.Command, args []string) error {
 
 func runDelete(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -302,7 +378,7 @@ func runDelete(cmd *cobra.Command, args []string) error {
 
 func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -343,7 +419,7 @@ func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 
 func runGet(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -370,7 +446,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 
 func runList(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -390,7 +466,7 @@ func runList(cmd *cobra.Command, args []string) error {
 
 func runListLabels(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -409,7 +485,7 @@ func runListLabels(cmd *cobra.Command, args []string) error {
 
 func runRead(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -429,7 +505,7 @@ func runRead(cmd *cobra.Command, args []string) error {
 
 func runSearch(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
@@ -446,31 +522,22 @@ func runSearch(cmd *cobra.Command, args []string) error {
 
 func runSend(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}
 
-	var message strings.Builder
-	message.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	if cc != "" {
-		message.WriteString(fmt.Sprintf("Cc: %s\r\n", cc))
+	var raw string
+	if len(attach) > 0 {
+		raw, err = gmail.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
+		if err != nil {
+			return fmt.Errorf("error building message: %w", err)
+		}
+	} else {
+		raw = gmail.BuildPlainMessage(to, cc, bcc, subject, body)
 	}
-	if bcc != "" {
-		message.WriteString(fmt.Sprintf("Bcc: %s\r\n", bcc))
-	}
-	message.WriteString(fmt.Sprintf("Subject: %s\r\n", mime.QEncoding.Encode("utf-8", subject)))
-	message.WriteString("MIME-Version: 1.0\r\n")
-	message.WriteString("Content-Type: text/plain; charset=\"utf-8\"\r\n")
-	message.WriteString("Content-Transfer-Encoding: base64\r\n")
-	message.WriteString("\r\n")
-	message.WriteString(base64.StdEncoding.EncodeToString([]byte(body)))
 
-	raw := base64.URLEncoding.EncodeToString([]byte(message.String()))
-
-	msg := &gmailapi.Message{
-		Raw: raw,
-	}
+	msg := &gmailapi.Message{Raw: raw}
 
 	_, err = service.Users.Messages.Send("me", msg).Do()
 	if err != nil {
@@ -483,7 +550,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 func runUnread(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
-	service, err := gmail.GetService(ctx)
+	service, err := gmail.GetService(ctx, account)
 	if err != nil {
 		return err
 	}

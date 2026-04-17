@@ -156,6 +156,7 @@ else
 endif
 
 # Install binary (installs the current platform binary)
+# If TARGET is set, installs there. Otherwise: root -> /usr/local/bin, regular user -> ~/.local/bin
 install: build
 	@if [ ! -f "$(CURRENT_BINARY)" ]; then \
 		echo "Error: Binary for current platform ($(CURRENT_PLATFORM)) not found"; \
@@ -163,12 +164,19 @@ install: build
 		exit 1; \
 	fi
 ifndef TARGET
-	@echo "Installing $(BINARY_NAME) ($(CURRENT_PLATFORM)) to /usr/local/bin..."
-	@sudo cp $(CURRENT_BINARY) /usr/local/bin/$(BINARY_NAME)
-	@echo "Installation complete!"
+	@if [ "$$(id -u)" = "0" ]; then \
+		INSTALL_DIR="/usr/local/bin"; \
+	else \
+		INSTALL_DIR="$$HOME/.local/bin"; \
+		mkdir -p "$$INSTALL_DIR"; \
+	fi; \
+	echo "Installing $(BINARY_NAME) ($(CURRENT_PLATFORM)) to $$INSTALL_DIR..."; \
+	cp $(CURRENT_BINARY) "$$INSTALL_DIR/$(BINARY_NAME)"; \
+	echo "Installation complete!"
 else
 	@echo "Installing $(BINARY_NAME) ($(CURRENT_PLATFORM)) to $(TARGET)..."
-	@cp $(CURRENT_BINARY) $(TARGET)/$(BINARY_NAME) 2>/dev/null || sudo cp $(CURRENT_BINARY) $(TARGET)/$(BINARY_NAME)
+	@mkdir -p $(TARGET)
+	@cp $(CURRENT_BINARY) $(TARGET)/$(BINARY_NAME)
 	@echo "Installation complete!"
 endif
 
