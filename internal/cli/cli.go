@@ -99,6 +99,8 @@ var (
 		RunE:  runGet,
 	}
 
+	getBodyHTML bool
+
 	labelsCmd = &cobra.Command{
 		Use:   "labels",
 		Short: "Manage labels",
@@ -167,6 +169,7 @@ func Init() {
 	setupSearchFlags()
 	setupDownloadAttachmentsFlags()
 	setupLabelCommands()
+	getCmd.Flags().BoolVar(&getBodyHTML, "html", false, "Return raw HTML body instead of plain text")
 
 	// Register all commands
 	RootCmd.AddCommand(accountsCmd)
@@ -438,7 +441,12 @@ func runGet(cmd *cobra.Command, args []string) error {
 
 	// Print body
 	fmt.Println("\n" + strings.Repeat("=", 80))
-	body := gmail.GetBody(msg.Payload)
+	var body string
+	if getBodyHTML {
+		body = gmail.GetHTMLBody(msg.Payload)
+	} else {
+		body = gmail.GetBody(msg.Payload)
+	}
 	fmt.Println(body)
 
 	return nil
