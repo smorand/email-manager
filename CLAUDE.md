@@ -55,14 +55,27 @@ email-manager [--account <email>]
 ├── search               # Search messages
 ├── read                 # Mark as read
 ├── unread               # Mark as unread
-├── archive              # Archive message
-├── delete               # Delete message
+├── archive              # Archive (remove INBOX label)
+├── trash                # Move message to trash
+├── untrash              # Restore from trash
+├── spam                 # Mark as spam
+├── not-spam             # Remove spam label
 ├── download-attachments # Download message attachments
-└── labels
-    ├── list             # List labels
-    ├── create           # Create label
-    └── apply            # Apply label to message
+├── labels
+│   ├── list             # List labels
+│   ├── create           # Create label
+│   ├── apply            # Apply label to message
+│   └── remove           # Remove label from message
+├── drafts
+│   ├── list             # List drafts
+│   ├── create           # Create draft (same flags as send)
+│   └── delete           # Delete draft
+└── skill                # Print agent skill (mode d'emploi for AI agents)
+    └── learn            # Persist a learned rule (--rule "...")
 ```
+
+The binary deliberately exposes only `trash` (reversible) and not a hard
+delete: permanent deletion is left to the Gmail web UI.
 
 ### Multi-account Logic
 
@@ -180,6 +193,7 @@ make uninstall  # Remove from system
 2. Implement `RunE` function
 3. Register in `Init()` function with `RootCmd.AddCommand()`
 4. All handlers receive `account` from the resolved global variable
+5. **Update `internal/cli/skill.md`** so AI agents see the new command (see "Skill maintenance" below)
 
 **Add OAuth scope**:
 1. Update `Scopes` slice in `pkg/auth/auth.go`
@@ -189,6 +203,7 @@ make uninstall  # Remove from system
 
 - **Credentials**: `GOOGLE_CREDENTIALS_FILE` env var or `~/.credentials/google_credentials.json`
 - **Tokens**: `~/.cache/email-manager/<account>.json` (one per account)
+- **User knowledge**: `~/.config/email-manager/*.md` (or `$XDG_CONFIG_HOME/email-manager/*.md`) — concatenated by `email-manager skill`
 - **Binary**: `bin/email-manager-<os>-<arch>` (after build)
 - **Installed**: `/usr/local/bin/email-manager` (after install)
 
@@ -208,6 +223,32 @@ pkg/
     └── auth_test.go
 ```
 
+## Skill maintenance (CRITICAL)
+
+The binary embeds an agent-facing skill document at
+`internal/cli/skill.md` (loaded via `//go:embed`). It is printed by
+`email-manager skill` and is what AI agents read to know how to drive the
+tool.
+
+**Whenever any of the following changes, the embedded `skill.md` MUST be
+updated in the same commit:**
+
+- Adding, renaming, or removing a command or subcommand
+- Changing a command flag (name, default, semantics)
+- Changing the multi-account resolution logic
+- Changing default workflow rules (e.g. INBOX-only scanning)
+- Changing destination labels or confirmation policies
+- Changing token / credentials / config paths
+- Changing the `skill learn` storage format or location
+
+After editing `internal/cli/skill.md`, rebuild and verify with
+`./bin/email-manager-<platform> skill | head -50`.
+
+User-specific knowledge lives under `~/.config/email-manager/*.md` (or
+`$XDG_CONFIG_HOME/email-manager/*.md`); `email-manager skill` concatenates
+those files to the embedded doc at runtime, so they are NOT shipped in the
+binary.
+
 ## Compliance Checklist
 
 - [x] Remove code duplication (extract common functions)
@@ -221,6 +262,8 @@ pkg/
 - [x] Add People API scopes for unified credentials
 - [x] Multi-account support via --account flag
 - [x] Functional attachment support in send command
+- [x] Trash / untrash / spam / not-spam / labels remove / drafts CRUD
+- [x] Self-documenting `skill` command for AI agents
 - [ ] Add unit tests
 - [ ] Add integration tests
 

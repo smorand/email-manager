@@ -43,6 +43,19 @@ func ExtractHeaders(headers []*gmail.MessagePartHeader) (subject, from string) {
 	return
 }
 
+// ExtractDraftHeaders extracts subject and to headers from a draft message.
+func ExtractDraftHeaders(headers []*gmail.MessagePartHeader) (subject, to string) {
+	for _, header := range headers {
+		switch header.Name {
+		case "Subject":
+			subject = header.Value
+		case "To":
+			to = header.Value
+		}
+	}
+	return
+}
+
 // collectBodies walks the MIME tree recursively and returns the first text/plain
 // and text/html parts it finds (decoded).
 func collectBodies(part *gmail.MessagePart) (plain, htmlBody string) {

@@ -6,12 +6,15 @@ A command-line interface (CLI) tool for managing Gmail emails using the Gmail AP
 
 - Multi-account support: manage multiple Gmail accounts with `--account` flag
 - Send emails with CC, BCC, and attachments
+- Manage drafts (list, create with attachments, delete)
 - List and search messages
 - Mark messages as read/unread
-- Archive and delete messages
+- Archive, trash, untrash messages
+- Mark / unmark spam
 - Download message attachments
-- Manage Gmail labels
+- Manage Gmail labels (list, create, apply, remove)
 - OAuth2 authentication with Google
+- Self-documenting via `email-manager skill` for AI agent integration
 
 ## Prerequisites
 
@@ -58,9 +61,9 @@ make uninstall
 3. Download the credentials JSON file
 4. Set the `GOOGLE_CREDENTIALS_FILE` environment variable to point to your credentials file:
    ```bash
-   export GOOGLE_CREDENTIALS_FILE=~/.credentials/scm-pwd-web.json
+   export GOOGLE_CREDENTIALS_FILE=~/.credentials/google_credentials.json
    ```
-   Alternatively, save credentials to the default location: `~/.credentials/google_credentials.json`
+   Alternatively, the binary falls back to `~/.credentials/google_credentials.json`.
 5. Authenticate your Gmail account:
    ```bash
    email-manager auth --account user@gmail.com
@@ -174,10 +177,21 @@ email-manager unread <message-id>
 email-manager archive <message-id>
 ```
 
-### Delete Message
+### Trash / Untrash
 
 ```bash
-email-manager delete <message-id>
+email-manager trash <message-id>
+email-manager untrash <message-id>
+```
+
+The binary deliberately does not expose a permanent delete: trash is reversible
+via `untrash`, hard-delete is left to the Gmail web UI.
+
+### Spam / Not-spam
+
+```bash
+email-manager spam <message-id>
+email-manager not-spam <message-id>
 ```
 
 ### Download Attachments
@@ -201,7 +215,62 @@ email-manager labels create "MyLabel"
 
 # Apply label to message
 email-manager labels apply <message-id> <label-id>
+
+# Remove label from message
+email-manager labels remove <message-id> <label-id>
 ```
+
+### Manage Drafts
+
+```bash
+# List drafts
+email-manager drafts list
+
+# Create a draft (same flags as send)
+email-manager drafts create --to "recipient@example.com" --subject "Hello" --body "Draft content"
+email-manager drafts create --to "..." --subject "..." --body "..." --attach file.pdf
+
+# Delete a draft
+email-manager drafts delete <draft-id>
+```
+
+## Use with AI agent coding tools
+
+`email-manager` is self-documenting for AI agents (Claude Code, Cursor,
+Aider, ...). The binary embeds a complete usage guide accessible via:
+
+```bash
+email-manager skill
+```
+
+To make any project's AI agent aware of `email-manager`, add a single line
+to that project's `CLAUDE.md` (or `AGENTS.md`):
+
+```markdown
+For Gmail email management, run `email-manager skill` to get the full usage
+guide and workflows.
+```
+
+The agent will execute `email-manager skill` on demand, retrieving:
+
+- The current command list
+- The multi-account workflow
+- Default rules (INBOX-only scanning, destination labels, confirmation
+  policies)
+- Any user-specific knowledge stored under `~/.config/email-manager/*.md`
+
+### Teaching new rules to the agent
+
+When the user expresses a permanent preference ("emails from X should always
+be archived"), the agent should persist it via:
+
+```bash
+email-manager skill learn --rule "emails from noreply@example.com -> archive + label personal/commandes"
+```
+
+This appends the rule to `~/.config/email-manager/regles-tri.md`, which is
+automatically concatenated to subsequent `email-manager skill` calls so the
+agent picks up the new rule on the next invocation.
 
 ## Development
 
@@ -268,6 +337,7 @@ email-manager/
 
 - **Credentials**: `GOOGLE_CREDENTIALS_FILE` env var or `~/.credentials/google_credentials.json`
 - **Tokens**: `~/.cache/email-manager/<account>.json` (one per account)
+- **User knowledge** (read by `email-manager skill`): `~/.config/email-manager/*.md` (or `$XDG_CONFIG_HOME/email-manager/*.md`)
 - **Binary**: `bin/email-manager-<os>-<arch>` (after build)
 
 ## License

@@ -78,11 +78,63 @@ var (
 		RunE:  runCreateLabel,
 	}
 
-	deleteCmd = &cobra.Command{
-		Use:   "delete <message-id>",
-		Short: "Delete a message",
+	trashCmd = &cobra.Command{
+		Use:   "trash <message-id>",
+		Short: "Move a message to trash",
 		Args:  cobra.ExactArgs(1),
-		RunE:  runDelete,
+		RunE:  runTrash,
+	}
+
+	untrashCmd = &cobra.Command{
+		Use:   "untrash <message-id>",
+		Short: "Restore a message from trash",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runUntrash,
+	}
+
+	spamCmd = &cobra.Command{
+		Use:   "spam <message-id>",
+		Short: "Mark message as spam",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runSpam,
+	}
+
+	notSpamCmd = &cobra.Command{
+		Use:   "not-spam <message-id>",
+		Short: "Remove spam label from message",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runNotSpam,
+	}
+
+	removeLabelCmd = &cobra.Command{
+		Use:   "remove <message-id> <label-id>",
+		Short: "Remove label from message",
+		Args:  cobra.ExactArgs(2),
+		RunE:  runRemoveLabel,
+	}
+
+	draftsCmd = &cobra.Command{
+		Use:   "drafts",
+		Short: "Manage drafts",
+	}
+
+	listDraftsCmd = &cobra.Command{
+		Use:   "list",
+		Short: "List drafts",
+		RunE:  runListDrafts,
+	}
+
+	createDraftCmd = &cobra.Command{
+		Use:   "create",
+		Short: "Create a draft",
+		RunE:  runCreateDraft,
+	}
+
+	deleteDraftCmd = &cobra.Command{
+		Use:   "delete <draft-id>",
+		Short: "Delete a draft",
+		Args:  cobra.ExactArgs(1),
+		RunE:  runDeleteDraft,
 	}
 
 	downloadAttachmentsCmd = &cobra.Command{
@@ -150,7 +202,12 @@ var (
 var skipAccountResolution = map[string]bool{
 	"accounts": true,
 	"help":     true,
+	"skill":    true,
+	"learn":    true,
 }
+
+// ruleText holds the content for `skill learn --rule`
+var ruleText string
 
 // Init initializes the CLI commands and flags.
 func Init() {
@@ -169,6 +226,8 @@ func Init() {
 	setupSearchFlags()
 	setupDownloadAttachmentsFlags()
 	setupLabelCommands()
+	setupDraftsCommands()
+	setupSkillCommand()
 	getCmd.Flags().BoolVar(&getBodyHTML, "html", false, "Return raw HTML body instead of plain text")
 
 	// Register all commands
@@ -181,9 +240,14 @@ func Init() {
 	RootCmd.AddCommand(readCmd)
 	RootCmd.AddCommand(unreadCmd)
 	RootCmd.AddCommand(archiveCmd)
-	RootCmd.AddCommand(deleteCmd)
+	RootCmd.AddCommand(trashCmd)
+	RootCmd.AddCommand(untrashCmd)
+	RootCmd.AddCommand(spamCmd)
+	RootCmd.AddCommand(notSpamCmd)
 	RootCmd.AddCommand(downloadAttachmentsCmd)
 	RootCmd.AddCommand(labelsCmd)
+	RootCmd.AddCommand(draftsCmd)
+	RootCmd.AddCommand(skillCmd)
 }
 
 func resolveAccount(cmd *cobra.Command, args []string) error {
@@ -232,6 +296,23 @@ func setupLabelCommands() {
 	labelsCmd.AddCommand(listLabelsCmd)
 	labelsCmd.AddCommand(createLabelCmd)
 	labelsCmd.AddCommand(applyLabelCmd)
+	labelsCmd.AddCommand(removeLabelCmd)
+}
+
+func setupDraftsCommands() {
+	createDraftCmd.Flags().StringVar(&to, "to", "", "Recipient email (required)")
+	createDraftCmd.Flags().StringVar(&subject, "subject", "", "Draft subject (required)")
+	createDraftCmd.Flags().StringVar(&body, "body", "", "Draft body (required)")
+	createDraftCmd.Flags().StringVar(&cc, "cc", "", "CC recipients (comma-separated)")
+	createDraftCmd.Flags().StringVar(&bcc, "bcc", "", "BCC recipients (comma-separated)")
+	createDraftCmd.Flags().StringSliceVar(&attach, "attach", []string{}, "Attachment file paths")
+	_ = createDraftCmd.MarkFlagRequired("to")
+	_ = createDraftCmd.MarkFlagRequired("subject")
+	_ = createDraftCmd.MarkFlagRequired("body")
+
+	draftsCmd.AddCommand(listDraftsCmd)
+	draftsCmd.AddCommand(createDraftCmd)
+	draftsCmd.AddCommand(deleteDraftCmd)
 }
 
 func setupListFlags() {
@@ -250,9 +331,9 @@ func setupSendFlags() {
 	sendCmd.Flags().StringVar(&cc, "cc", "", "CC recipients (comma-separated)")
 	sendCmd.Flags().StringVar(&bcc, "bcc", "", "BCC recipients (comma-separated)")
 	sendCmd.Flags().StringSliceVar(&attach, "attach", []string{}, "Attachment file paths")
-	sendCmd.MarkFlagRequired("to")
-	sendCmd.MarkFlagRequired("subject")
-	sendCmd.MarkFlagRequired("body")
+	_ = sendCmd.MarkFlagRequired("to")
+	_ = sendCmd.MarkFlagRequired("subject")
+	_ = sendCmd.MarkFlagRequired("body")
 }
 
 // Command handler functions (alphabetically ordered)
@@ -296,7 +377,7 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	if !strings.EqualFold(profile.EmailAddress, account) {
 		// Remove the inconsistent token
 		_ = auth.RemoveToken(account)
-		return fmt.Errorf("Inconsistent Authentication: authenticated as %s but expected %s", profile.EmailAddress, account)
+		return fmt.Errorf("inconsistent authentication: authenticated as %s but expected %s", profile.EmailAddress, account)
 	}
 
 	fmt.Fprintf(os.Stderr, "Authenticated as: %s\n", profile.EmailAddress)
@@ -363,7 +444,7 @@ func runCreateLabel(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runDelete(cmd *cobra.Command, args []string) error {
+func runTrash(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	service, err := gmail.GetService(ctx, account)
 	if err != nil {
@@ -372,10 +453,159 @@ func runDelete(cmd *cobra.Command, args []string) error {
 
 	_, err = service.Users.Messages.Trash("me", args[0]).Do()
 	if err != nil {
-		return fmt.Errorf("error deleting: %w", err)
+		return fmt.Errorf("error trashing message: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Message deleted\n")
+	fmt.Fprintf(os.Stderr, "Message moved to trash\n")
+	return nil
+}
+
+func runUntrash(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	_, err = service.Users.Messages.Untrash("me", args[0]).Do()
+	if err != nil {
+		return fmt.Errorf("error untrashing message: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Message restored from trash\n")
+	return nil
+}
+
+func runSpam(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	req := &gmailapi.ModifyMessageRequest{
+		AddLabelIds:    []string{"SPAM"},
+		RemoveLabelIds: []string{"INBOX"},
+	}
+
+	_, err = service.Users.Messages.Modify("me", args[0], req).Do()
+	if err != nil {
+		return fmt.Errorf("error marking as spam: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Message marked as spam\n")
+	return nil
+}
+
+func runNotSpam(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	req := &gmailapi.ModifyMessageRequest{
+		RemoveLabelIds: []string{"SPAM"},
+		AddLabelIds:    []string{"INBOX"},
+	}
+
+	_, err = service.Users.Messages.Modify("me", args[0], req).Do()
+	if err != nil {
+		return fmt.Errorf("error removing spam label: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Message removed from spam\n")
+	return nil
+}
+
+func runRemoveLabel(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	req := &gmailapi.ModifyMessageRequest{
+		RemoveLabelIds: []string{args[1]},
+	}
+
+	_, err = service.Users.Messages.Modify("me", args[0], req).Do()
+	if err != nil {
+		return fmt.Errorf("error removing label: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Label removed\n")
+	return nil
+}
+
+func runListDrafts(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	response, err := service.Users.Drafts.List("me").Do()
+	if err != nil {
+		return fmt.Errorf("error listing drafts: %w", err)
+	}
+
+	if len(response.Drafts) == 0 {
+		fmt.Fprintf(os.Stderr, "No drafts found\n")
+		return nil
+	}
+
+	for _, draft := range response.Drafts {
+		subjectHdr := ""
+		toHdr := ""
+		if draft.Message != nil && draft.Message.Payload != nil {
+			subjectHdr, toHdr = gmail.ExtractDraftHeaders(draft.Message.Payload.Headers)
+		}
+		fmt.Printf("ID: %s\n  To: %s\n  Subject: %s\n\n", draft.Id, toHdr, subjectHdr)
+	}
+	return nil
+}
+
+func runCreateDraft(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	var raw string
+	if len(attach) > 0 {
+		raw, err = gmail.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
+		if err != nil {
+			return fmt.Errorf("error building draft: %w", err)
+		}
+	} else {
+		raw = gmail.BuildPlainMessage(to, cc, bcc, subject, body)
+	}
+
+	draft := &gmailapi.Draft{Message: &gmailapi.Message{Raw: raw}}
+
+	created, err := service.Users.Drafts.Create("me", draft).Do()
+	if err != nil {
+		return fmt.Errorf("error creating draft: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Draft created (ID: %s)\n", created.Id)
+	return nil
+}
+
+func runDeleteDraft(cmd *cobra.Command, args []string) error {
+	ctx := context.Background()
+	service, err := gmail.GetService(ctx, account)
+	if err != nil {
+		return err
+	}
+
+	if err := service.Users.Drafts.Delete("me", args[0]).Do(); err != nil {
+		return fmt.Errorf("error deleting draft: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Draft deleted\n")
 	return nil
 }
 
