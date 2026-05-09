@@ -1,5 +1,7 @@
-// Package gmail provides Gmail API service functionality.
-package gmail
+// Package mailer provides Gmail API service functionality.
+// Named 'mailer' (not 'gmail') to avoid collision with the external
+// google.golang.org/api/gmail/v1 package.
+package mailer
 
 import (
 	"encoding/base64"

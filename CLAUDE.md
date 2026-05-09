@@ -24,8 +24,10 @@ email-manager/
 │       └── main.go           # Entry point (minimal)
 ├── internal/
 │   ├── cli/
-│   │   └── cli.go            # CLI commands, flags, multi-account logic
-│   └── gmail/
+│   │   ├── cli.go            # CLI commands, flags, multi-account logic
+│   │   ├── skill.go          # 'skill' / 'skill learn' commands
+│   │   └── skill.md          # Embedded mode d'emploi (//go:embed)
+│   └── mailer/
 │       ├── compose.go        # Email composition (plain text and multipart MIME)
 │       └── service.go        # Gmail API service and helpers
 └── pkg/
@@ -39,8 +41,8 @@ email-manager/
 
 1. **cmd/email-manager/main.go** : Minimal entry point, initializes CLI and executes
 2. **internal/cli/cli.go** : Command definitions, flag setup, command handlers, account resolution
-3. **internal/gmail/compose.go** : Email message composition (BuildPlainMessage, BuildMessageWithAttachments)
-4. **internal/gmail/service.go** : Gmail API service wrapper and helper functions
+3. **internal/mailer/compose.go** : Email message composition (BuildPlainMessage, BuildMessageWithAttachments)
+4. **internal/mailer/service.go** : Gmail API service wrapper and helper functions
 5. **pkg/auth/auth.go** : OAuth2 authentication with multi-account token storage (designed to be duplicated to google-contacts)
 
 ### Command Structure
@@ -137,7 +139,7 @@ people.ContactsOtherReadonlyScope
 email-manager auth --account user@gmail.com
 ```
 
-## Helper Functions (internal/gmail/service.go)
+## Helper Functions (internal/mailer/service.go)
 
 ```go
 func GetService(ctx context.Context, account string) (*gmail.Service, error)
@@ -148,7 +150,7 @@ func ProcessAttachments(service *gmail.Service, messageID string, part *gmail.Me
 func ExpandTilde(path string) (string, error)
 ```
 
-## Compose Functions (internal/gmail/compose.go)
+## Compose Functions (internal/mailer/compose.go)
 
 ```go
 func BuildPlainMessage(to, cc, bcc, subject, body string) string
@@ -264,6 +266,13 @@ binary.
 - [x] Functional attachment support in send command
 - [x] Trash / untrash / spam / not-spam / labels remove / drafts CRUD
 - [x] Self-documenting `skill` command for AI agents
+- [x] Canonical Makefile (golang skill reference)
+- [x] LICENSE (MIT)
+- [x] golangci-lint configured (`.golangci.yml`)
+- [x] Package renamed `internal/gmail` -> `internal/mailer` (collision fix)
+- [x] Magic file modes extracted to constants
+- [x] OAuth callback race fixed (listener-based, no Sleep)
+- [x] Use `cmd.Context()` instead of `context.Background()`
 - [ ] Add unit tests
 - [ ] Add integration tests
 

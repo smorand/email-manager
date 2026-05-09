@@ -11,6 +11,15 @@ bin/
 *.test
 *.out
 go.work
+coverage.out
+coverage.html
+
+# Worktrees
+.worktrees/
+
+# Temporary
+*.tmp
+*.bak
 
 # IDE
 .vscode/

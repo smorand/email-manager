@@ -16,10 +16,10 @@ import (
 var embeddedSkill string
 
 const (
-	skillConfigDir  = "email-manager"
-	skillRulesFile  = "regles-tri.md"
-	skillDirPerm    = 0o755
-	skillFilePerm   = 0o644
+	skillConfigDir = "email-manager"
+	skillRulesFile = "regles-tri.md"
+	skillDirPerm   = 0o755
+	skillFilePerm  = 0o644
 )
 
 var (

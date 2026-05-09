@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,6 +27,31 @@ const (
 	DefaultCredentialsFile = "google_credentials.json"
 	// TokenDir is the directory name for per-account token files.
 	TokenDir = "email-manager"
+
+	// tokenDirPerm is the permission for the token directory (owner only).
+	tokenDirPerm = 0o700
+	// tokenFilePerm is the permission for token files (owner only, contains secrets).
+	tokenFilePerm = 0o600
+
+	// oauthCallbackPort is the local port used for the OAuth2 redirect.
+	// Bind to 127.0.0.1 explicitly so we don't expose the callback to the network.
+	oauthCallbackPort = "127.0.0.1:8002"
+	// oauthCallbackPath is the URL path that receives the OAuth2 callback.
+	oauthCallbackPath = "/oauth2callback"
+	// oauthRedirectURL is the full redirect URL (must match the OAuth client).
+	// Always uses localhost (loopback) regardless of the literal bind address.
+	oauthRedirectURL = "http://localhost:8002" + oauthCallbackPath
+
+	// oauthReadHeaderTimeout protects the local callback server against
+	// slowloris-style header-read stalls.
+	oauthReadHeaderTimeout = 5 * time.Second
+
+	// oauthTimeout is the maximum duration to wait for the user to complete
+	// the OAuth flow in their browser.
+	oauthTimeout = 3 * time.Minute
+	// oauthShutdownTimeout is the grace period for shutting down the local
+	// callback HTTP server after receiving the code.
+	oauthShutdownTimeout = 5 * time.Second
 )
 
 // Scopes contains all OAuth2 scopes for Gmail and People APIs.
@@ -120,98 +146,85 @@ func GetClient(ctx context.Context, account string) (*http.Client, error) {
 
 	token, err := tokenFromFile(tokenPath)
 	if err != nil {
-		token, err = getTokenFromWeb(config)
+		token, err = getTokenFromWeb(ctx, config)
 		if err != nil {
 			return nil, err
 		}
 		if err := saveToken(tokenPath, token); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: unable to save token: %v\n", err)
+			return nil, fmt.Errorf("unable to save token to %s: %w", tokenPath, err)
 		}
 	}
 
 	return config.Client(ctx, token), nil
 }
 
-func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
-	// Use localhost with port matching credentials redirect_uris
-	config.RedirectURL = "http://localhost:8002/oauth2callback"
+const oauthSuccessHTML = `<!doctype html>
+<html><body>
+  <h1>Authentication successful!</h1>
+  <p>You can close this window and return to the terminal.</p>
+</body></html>`
 
-	// Create channels for communication
-	codeChan := make(chan string)
-	errChan := make(chan error)
+func getTokenFromWeb(ctx context.Context, config *oauth2.Config) (*oauth2.Token, error) {
+	config.RedirectURL = oauthRedirectURL
 
-	// Start local HTTP server using a dedicated mux to avoid conflicts
+	codeChan := make(chan string, 1)
+	errChan := make(chan error, 1)
+
 	mux := http.NewServeMux()
-	server := &http.Server{Addr: ":8002", Handler: mux}
-	mux.HandleFunc("/oauth2callback", func(w http.ResponseWriter, r *http.Request) {
+	listener, err := net.Listen("tcp", oauthCallbackPort)
+	if err != nil {
+		return nil, fmt.Errorf("unable to listen on %s: %w", oauthCallbackPort, err)
+	}
+	server := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: oauthReadHeaderTimeout,
+	}
+
+	mux.HandleFunc(oauthCallbackPath, func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
 		if code == "" {
-			errChan <- fmt.Errorf("no code in callback")
+			errChan <- fmt.Errorf("no code in OAuth callback")
 			return
 		}
 
-		// Send success message to browser
 		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `
-			<html>
-			<body>
-				<h1>Authentication successful!</h1>
-				<p>You can close this window and return to the terminal.</p>
-			</body>
-			</html>
-		`)
+		if _, werr := fmt.Fprint(w, oauthSuccessHTML); werr != nil {
+			fmt.Fprintf(os.Stderr, "warning: unable to write success page: %v\n", werr)
+		}
 
 		codeChan <- code
 	})
 
-	// Start server in background
+	// Start server. Listener is already bound, so the server is ready as soon
+	// as Serve is called — no need for a sleep-based race.
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			errChan <- err
 		}
 	}()
 
-	// Wait a moment for server to start
-	time.Sleep(100 * time.Millisecond)
-
-	// Generate auth URL
 	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
 	fmt.Printf("Opening browser for authentication...\n")
 	fmt.Printf("If browser doesn't open, visit:\n%v\n\n", authURL)
 
-	// Try to open browser automatically
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", authURL)
-	case "linux":
-		cmd = exec.Command("xdg-open", authURL)
-	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", authURL)
-	}
+	openBrowser(authURL)
 
-	if cmd != nil {
-		_ = cmd.Start()
-	}
-
-	// Wait for auth code or error
 	var code string
 	select {
 	case code = <-codeChan:
-		// Success
 	case err := <-errChan:
 		return nil, err
-	case <-time.After(3 * time.Minute):
-		return nil, fmt.Errorf("authentication timeout after 3 minutes")
+	case <-time.After(oauthTimeout):
+		return nil, fmt.Errorf("authentication timeout after %s", oauthTimeout)
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 
-	// Shutdown server
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, oauthShutdownTimeout)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
 
-	// Exchange code for token
-	tok, err := config.Exchange(context.Background(), code)
+	tok, err := config.Exchange(ctx, code)
 	if err != nil {
 		return nil, fmt.Errorf("unable to retrieve token from web: %w", err)
 	}
@@ -220,12 +233,30 @@ func getTokenFromWeb(config *oauth2.Config) (*oauth2.Token, error) {
 	return tok, nil
 }
 
+// openBrowser launches the user's default browser to view the given OAuth URL.
+// The URL is built by golang.org/x/oauth2 from the application's static config,
+// so it is trusted input.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url) //nolint:gosec // trusted OAuth URL
+	case "linux":
+		cmd = exec.Command("xdg-open", url) //nolint:gosec // trusted OAuth URL
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url) //nolint:gosec // trusted OAuth URL
+	default:
+		return
+	}
+	_ = cmd.Start()
+}
+
 func tokenFromFile(file string) (*oauth2.Token, error) {
-	f, err := os.Open(file)
+	f, err := os.Open(file) //nolint:gosec // path is built from a controlled cache directory
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	token := &oauth2.Token{}
 	err = json.NewDecoder(f).Decode(token)
@@ -235,15 +266,20 @@ func tokenFromFile(file string) (*oauth2.Token, error) {
 func saveToken(path string, token *oauth2.Token) error {
 	fmt.Fprintf(os.Stderr, "Saving credentials to: %s\n", path)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+	if err := os.MkdirAll(filepath.Dir(path), tokenDirPerm); err != nil {
+		return fmt.Errorf("unable to create token directory: %w", err)
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, tokenFilePerm)
 	if err != nil {
-		return err
+		return fmt.Errorf("unable to open token file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
-	return json.NewEncoder(f).Encode(token)
+	// Persisting the access/refresh token is the explicit purpose of this
+	// function; gosec's secret-pattern heuristic does not apply.
+	if err := json.NewEncoder(f).Encode(token); err != nil { //nolint:gosec // intentional token persistence
+		return fmt.Errorf("unable to encode token: %w", err)
+	}
+	return nil
 }

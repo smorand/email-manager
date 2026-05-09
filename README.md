@@ -324,8 +324,10 @@ email-manager/
 │       └── main.go           # Entry point
 ├── internal/
 │   ├── cli/
-│   │   └── cli.go            # CLI command implementations
-│   └── gmail/
+│   │   ├── cli.go            # CLI command implementations
+│   │   ├── skill.go          # 'skill' / 'skill learn' commands
+│   │   └── skill.md          # Embedded agent skill (//go:embed)
+│   └── mailer/
 │       ├── compose.go        # Email composition (plain and multipart MIME)
 │       └── service.go        # Gmail API service
 └── pkg/

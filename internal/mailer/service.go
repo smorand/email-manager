@@ -1,5 +1,7 @@
-// Package gmail provides Gmail API service functionality.
-package gmail
+// Package mailer provides Gmail API service functionality.
+// Named 'mailer' (not 'gmail') to avoid collision with the external
+// google.golang.org/api/gmail/v1 package.
+package mailer
 
 import (
 	"context"
@@ -13,6 +15,15 @@ import (
 	"golang.org/x/net/html"
 	"google.golang.org/api/gmail/v1"
 	"google.golang.org/api/option"
+)
+
+const (
+	// AttachmentDirPerm is the permission used when creating directories for
+	// downloaded attachments.
+	AttachmentDirPerm = 0o755
+	// AttachmentFilePerm is the permission used when writing downloaded
+	// attachment files.
+	AttachmentFilePerm = 0o644
 )
 
 // GetService returns a Gmail service instance for the given account.
@@ -254,7 +265,7 @@ func ProcessAttachments(service *gmail.Service, messageID string, part *gmail.Me
 
 			// Write to file
 			filepath := fmt.Sprintf("%s/%s", dir, part.Filename)
-			if err := os.WriteFile(filepath, data, 0644); err != nil {
+			if err := os.WriteFile(filepath, data, AttachmentFilePerm); err != nil {
 				return fmt.Errorf("error writing file %s: %w", filepath, err)
 			}
 

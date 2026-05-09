@@ -2,24 +2,15 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
 
-	"email-manager/internal/gmail"
+	"email-manager/internal/mailer"
 	"email-manager/pkg/auth"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	gmailapi "google.golang.org/api/gmail/v1"
-)
-
-// Color functions
-var (
-	cyan  = color.New(color.FgCyan).SprintFunc()
-	green = color.New(color.FgGreen).SprintFunc()
-	red   = color.New(color.FgRed).SprintFunc()
 )
 
 // Command line flags
@@ -361,8 +352,7 @@ func runAuth(cmd *cobra.Command, args []string) error {
 	}
 
 	// Trigger authentication
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
@@ -385,8 +375,7 @@ func runAuth(cmd *cobra.Command, args []string) error {
 }
 
 func runApplyLabel(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -405,8 +394,7 @@ func runApplyLabel(cmd *cobra.Command, args []string) error {
 }
 
 func runArchive(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -425,8 +413,7 @@ func runArchive(cmd *cobra.Command, args []string) error {
 }
 
 func runCreateLabel(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -445,8 +432,7 @@ func runCreateLabel(cmd *cobra.Command, args []string) error {
 }
 
 func runTrash(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -461,8 +447,7 @@ func runTrash(cmd *cobra.Command, args []string) error {
 }
 
 func runUntrash(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -477,8 +462,7 @@ func runUntrash(cmd *cobra.Command, args []string) error {
 }
 
 func runSpam(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -498,8 +482,7 @@ func runSpam(cmd *cobra.Command, args []string) error {
 }
 
 func runNotSpam(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -519,8 +502,7 @@ func runNotSpam(cmd *cobra.Command, args []string) error {
 }
 
 func runRemoveLabel(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -539,8 +521,7 @@ func runRemoveLabel(cmd *cobra.Command, args []string) error {
 }
 
 func runListDrafts(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -559,7 +540,7 @@ func runListDrafts(cmd *cobra.Command, args []string) error {
 		subjectHdr := ""
 		toHdr := ""
 		if draft.Message != nil && draft.Message.Payload != nil {
-			subjectHdr, toHdr = gmail.ExtractDraftHeaders(draft.Message.Payload.Headers)
+			subjectHdr, toHdr = mailer.ExtractDraftHeaders(draft.Message.Payload.Headers)
 		}
 		fmt.Printf("ID: %s\n  To: %s\n  Subject: %s\n\n", draft.Id, toHdr, subjectHdr)
 	}
@@ -567,20 +548,19 @@ func runListDrafts(cmd *cobra.Command, args []string) error {
 }
 
 func runCreateDraft(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
 
 	var raw string
 	if len(attach) > 0 {
-		raw, err = gmail.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
+		raw, err = mailer.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
 		if err != nil {
 			return fmt.Errorf("error building draft: %w", err)
 		}
 	} else {
-		raw = gmail.BuildPlainMessage(to, cc, bcc, subject, body)
+		raw = mailer.BuildPlainMessage(to, cc, bcc, subject, body)
 	}
 
 	draft := &gmailapi.Draft{Message: &gmailapi.Message{Raw: raw}}
@@ -595,8 +575,7 @@ func runCreateDraft(cmd *cobra.Command, args []string) error {
 }
 
 func runDeleteDraft(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -610,8 +589,7 @@ func runDeleteDraft(cmd *cobra.Command, args []string) error {
 }
 
 func runDownloadAttachments(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -625,19 +603,19 @@ func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 	}
 
 	// Expand tilde in download directory
-	dir, err := gmail.ExpandTilde(downloadDir)
+	dir, err := mailer.ExpandTilde(downloadDir)
 	if err != nil {
 		return err
 	}
 
 	// Create download directory if it doesn't exist
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, mailer.AttachmentDirPerm); err != nil {
 		return fmt.Errorf("error creating download directory: %w", err)
 	}
 
 	// Process attachments
 	attachmentCount := 0
-	if err := gmail.ProcessAttachments(service, messageID, msg.Payload, dir, &attachmentCount); err != nil {
+	if err := mailer.ProcessAttachments(service, messageID, msg.Payload, dir, &attachmentCount); err != nil {
 		return err
 	}
 
@@ -651,8 +629,7 @@ func runDownloadAttachments(cmd *cobra.Command, args []string) error {
 }
 
 func runGet(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -673,9 +650,9 @@ func runGet(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n" + strings.Repeat("=", 80))
 	var body string
 	if getBodyHTML {
-		body = gmail.GetHTMLBody(msg.Payload)
+		body = mailer.GetHTMLBody(msg.Payload)
 	} else {
-		body = gmail.GetBody(msg.Payload)
+		body = mailer.GetBody(msg.Payload)
 	}
 	fmt.Println(body)
 
@@ -683,8 +660,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -699,12 +675,11 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error listing messages: %w", err)
 	}
 
-	return gmail.ListMessagesWithDetails(service, response.Messages)
+	return mailer.ListMessagesWithDetails(service, response.Messages)
 }
 
 func runListLabels(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -722,8 +697,7 @@ func runListLabels(cmd *cobra.Command, args []string) error {
 }
 
 func runRead(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -742,8 +716,7 @@ func runRead(cmd *cobra.Command, args []string) error {
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -755,24 +728,23 @@ func runSearch(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Found %d messages\n\n", len(response.Messages))
 
-	return gmail.ListMessagesWithDetails(service, response.Messages)
+	return mailer.ListMessagesWithDetails(service, response.Messages)
 }
 
 func runSend(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
 
 	var raw string
 	if len(attach) > 0 {
-		raw, err = gmail.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
+		raw, err = mailer.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
 		if err != nil {
 			return fmt.Errorf("error building message: %w", err)
 		}
 	} else {
-		raw = gmail.BuildPlainMessage(to, cc, bcc, subject, body)
+		raw = mailer.BuildPlainMessage(to, cc, bcc, subject, body)
 	}
 
 	msg := &gmailapi.Message{Raw: raw}
@@ -787,8 +759,7 @@ func runSend(cmd *cobra.Command, args []string) error {
 }
 
 func runUnread(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
-	service, err := gmail.GetService(ctx, account)
+	service, err := mailer.GetService(cmd.Context(), account)
 	if err != nil {
 		return err
 	}
@@ -805,8 +776,3 @@ func runUnread(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Message marked as unread\n")
 	return nil
 }
-
-// Suppress unused variable warnings for color functions
-var _ = cyan
-var _ = green
-var _ = red
