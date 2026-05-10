@@ -208,7 +208,12 @@ Ces fichiers sont automatiquement inclus dans la sortie de
 - Credentials OAuth2 : `GOOGLE_CREDENTIALS_FILE` (par défaut
   `~/.credentials/google_credentials.json`)
 - Tokens par compte : `~/.cache/email-manager/<email>.json`
-- Pour (re)-authentifier après expiration :
-  ```bash
-  email-manager auth --account <email>
-  ```
+
+**Reconnexion automatique** : quand un access token expire, le binaire le
+rafraîchit silencieusement via le refresh token. Si le refresh token lui-
+même est invalide / révoqué, le binaire ouvre **automatiquement** le
+navigateur pour relancer le flow OAuth, persiste le nouveau token, puis
+poursuit la commande en cours. **L'agent ne doit donc jamais demander à
+l'utilisateur de lancer `email-manager auth` manuellement** ; cette
+commande reste disponible uniquement pour forcer une re-authentification
+volontaire (changement de scope, rotation de credentials, etc.).

@@ -129,7 +129,11 @@ func RemoveToken(account string) error {
 	return nil
 }
 
-// GetClient returns an HTTP client with OAuth2 authentication for the given account.
+// GetClient returns an HTTP client with OAuth2 authentication for the given
+// account. The returned client transparently refreshes the access token on
+// every request and, if the refresh itself fails (refresh token revoked,
+// missing, or otherwise invalid), opens the browser to re-run the OAuth
+// consent flow and persists the new token before retrying.
 func GetClient(ctx context.Context, account string) (*http.Client, error) {
 	credPath := GetCredentialsFilePath()
 	tokenPath := GetTokenPathForAccount(account)
@@ -155,7 +159,58 @@ func GetClient(ctx context.Context, account string) (*http.Client, error) {
 		}
 	}
 
-	return config.Client(ctx, token), nil
+	src := &reauthTokenSource{
+		ctx:       ctx,
+		config:    config,
+		base:      config.TokenSource(ctx, token),
+		tokenPath: tokenPath,
+		lastSaved: token.AccessToken,
+	}
+	return oauth2.NewClient(ctx, src), nil
+}
+
+// reauthTokenSource wraps oauth2's standard refreshing TokenSource so that:
+//  1. when the underlying refresh fails (e.g. the refresh token has been
+//     revoked or the saved token is missing one), the user's browser is
+//     re-launched through the same OAuth flow used by the `auth` command,
+//     instead of bubbling up a cryptic "invalid_grant" error to the caller;
+//  2. when the refresh succeeds and a new access token is issued, that token
+//     is persisted to disk so subsequent processes do not need to refresh
+//     again immediately.
+type reauthTokenSource struct {
+	ctx       context.Context
+	config    *oauth2.Config
+	base      oauth2.TokenSource
+	tokenPath string
+	lastSaved string
+}
+
+func (r *reauthTokenSource) Token() (*oauth2.Token, error) {
+	tok, err := r.base.Token()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Auth: token refresh failed (%v); opening browser to re-authenticate...\n", err)
+		if rmErr := os.Remove(r.tokenPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			return nil, fmt.Errorf("unable to remove stale token at %s: %w", r.tokenPath, rmErr)
+		}
+		newTok, werr := getTokenFromWeb(r.ctx, r.config)
+		if werr != nil {
+			return nil, fmt.Errorf("re-authentication failed: %w", werr)
+		}
+		if serr := saveToken(r.tokenPath, newTok); serr != nil {
+			return nil, fmt.Errorf("unable to save refreshed token: %w", serr)
+		}
+		r.base = r.config.TokenSource(r.ctx, newTok)
+		r.lastSaved = newTok.AccessToken
+		return newTok, nil
+	}
+	if tok.AccessToken != r.lastSaved {
+		if serr := saveToken(r.tokenPath, tok); serr != nil {
+			fmt.Fprintf(os.Stderr, "warning: unable to persist refreshed token: %v\n", serr)
+		} else {
+			r.lastSaved = tok.AccessToken
+		}
+	}
+	return tok, nil
 }
 
 const oauthSuccessHTML = `<!doctype html>
