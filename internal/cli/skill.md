@@ -15,7 +15,7 @@ Déclencheurs typiques (français) :
 - "mail de X", "mail chez X" (X = prénom : Lamya, Seb, ...)
 - "sur le compte de X", "dans la boîte de X"
 
-Pour les emails **professionnels** (L'*******, IBM), utiliser `o365-manager` à
+Pour les emails **professionnels** (Employer, IBM), utiliser `o365-manager` à
 la place.
 
 ## Multi-comptes : workflow OBLIGATOIRE
@@ -95,7 +95,7 @@ Toute commande accepte `--help` pour voir les options détaillées.
 
 **Scanner UNIQUEMENT l'INBOX**. Les emails déjà classés dans d'autres labels
 (`personal/ecole`, `personal/voyage`, `personal/commandes`, `personal/Maison`,
-`pro/L'*******`) ne doivent JAMAIS être re-triés. Une fois qu'un email a quitté
+`pro/Employer`) ne doivent JAMAIS être re-triés. Une fois qu'un email a quitté
 l'INBOX, il n'est plus touché par le tri automatique.
 
 Exception : si l'utilisateur demande explicitement de scanner un autre label.
@@ -108,7 +108,7 @@ Exception : si l'utilisateur demande explicitement de scanner un autre label.
 | `personal/voyage` | Confirmations de voyage, billets, Uber transport |
 | `personal/commandes` | Confirmations de commandes, Amazon, Fnac, Uber Eats |
 | `personal/Maison` | Factures Free, Netflix, Sosh, Disney+, Crunchyroll |
-| `pro/L'*******` | Emails professionnels L'******* |
+| `pro/Employer` | Emails professionnels Employer |
 
 ### Workflow type pour un email d'INBOX
 
