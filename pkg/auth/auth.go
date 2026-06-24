@@ -62,6 +62,10 @@ var Scopes = []string{
 	gmail.GmailModifyScope,
 	gmail.GmailSendScope,
 	gmail.GmailLabelsScope,
+	// gmail.settings.basic is needed to read the user's sendAs display name
+	// so that an RFC 2047 encoded From header can be set on outgoing messages
+	// (avoids mojibake on names with non-ASCII characters).
+	gmail.GmailSettingsBasicScope,
 	// People API scopes (for google-contacts)
 	people.ContactsScope,
 	people.ContactsOtherReadonlyScope,

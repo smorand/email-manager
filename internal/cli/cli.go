@@ -553,14 +553,16 @@ func runCreateDraft(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	from := resolveFrom(service)
+
 	var raw string
 	if len(attach) > 0 {
-		raw, err = mailer.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
+		raw, err = mailer.BuildMessageWithAttachments(from, to, cc, bcc, subject, body, attach)
 		if err != nil {
 			return fmt.Errorf("error building draft: %w", err)
 		}
 	} else {
-		raw = mailer.BuildPlainMessage(to, cc, bcc, subject, body)
+		raw = mailer.BuildPlainMessage(from, to, cc, bcc, subject, body)
 	}
 
 	draft := &gmailapi.Draft{Message: &gmailapi.Message{Raw: raw}}
@@ -737,14 +739,16 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	from := resolveFrom(service)
+
 	var raw string
 	if len(attach) > 0 {
-		raw, err = mailer.BuildMessageWithAttachments(to, cc, bcc, subject, body, attach)
+		raw, err = mailer.BuildMessageWithAttachments(from, to, cc, bcc, subject, body, attach)
 		if err != nil {
 			return fmt.Errorf("error building message: %w", err)
 		}
 	} else {
-		raw = mailer.BuildPlainMessage(to, cc, bcc, subject, body)
+		raw = mailer.BuildPlainMessage(from, to, cc, bcc, subject, body)
 	}
 
 	msg := &gmailapi.Message{Raw: raw}
@@ -756,6 +760,26 @@ func runSend(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Email sent successfully to %s\n", to)
 	return nil
+}
+
+// resolveFrom returns the From header value (raw "Name <email>") for the
+// authenticated user, or an empty string if it cannot be retrieved (e.g.
+// missing gmail.settings.basic scope on a token issued before the scope was
+// added). When empty, the message is sent without an explicit From and Gmail
+// auto-injects it (which can produce mojibake for non-ASCII display names —
+// the user is warned and pointed at the re-auth command).
+func resolveFrom(service *gmailapi.Service) string {
+	from, err := mailer.GetDefaultFrom(service)
+	if err != nil {
+		fmt.Fprintf(os.Stderr,
+			"warning: unable to fetch sender display name (%v).\n"+
+				"         If the recipient sees garbled characters in your name,\n"+
+				"         re-authenticate to pick up the new scope:\n"+
+				"           email-manager auth --account %s\n",
+			err, account)
+		return ""
+	}
+	return from
 }
 
 func runUnread(cmd *cobra.Command, args []string) error {

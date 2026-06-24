@@ -41,6 +41,36 @@ func GetService(ctx context.Context, account string) (*gmail.Service, error) {
 	return service, nil
 }
 
+// GetDefaultFrom returns the raw "Display Name <email>" value for the user's
+// primary sendAs alias, or just the email when no display name is configured.
+// Returns an empty string (without error) when the account has no sendAs
+// settings. The returned value is not RFC 2047 encoded; the compose layer
+// performs the encoding.
+//
+// Requires the gmail.settings.basic scope. On the first call after the scope
+// was added, callers should expect a transient permission error and prompt the
+// user to re-authenticate via `email-manager auth --account <email>`.
+func GetDefaultFrom(service *gmail.Service) (string, error) {
+	resp, err := service.Users.Settings.SendAs.List("me").Do()
+	if err != nil {
+		return "", fmt.Errorf("unable to list sendAs settings: %w", err)
+	}
+	var primary *gmail.SendAs
+	for _, s := range resp.SendAs {
+		if s.IsPrimary {
+			primary = s
+			break
+		}
+	}
+	if primary == nil {
+		return "", nil
+	}
+	if primary.DisplayName == "" {
+		return primary.SendAsEmail, nil
+	}
+	return fmt.Sprintf("%s <%s>", primary.DisplayName, primary.SendAsEmail), nil
+}
+
 // ExtractHeaders extracts subject and from headers from a message.
 func ExtractHeaders(headers []*gmail.MessagePartHeader) (subject, from string) {
 	for _, header := range headers {
