@@ -41,7 +41,7 @@ email-manager/
 
 1. **cmd/email-manager/main.go** : Minimal entry point, initializes CLI and executes
 2. **internal/cli/cli.go** : Command definitions, flag setup, command handlers, account resolution
-3. **internal/mailer/compose.go** : Email message composition (BuildPlainMessage, BuildMessageWithAttachments)
+3. **internal/mailer/compose.go** : Email message composition (BuildMIMEMessage: text/plain, HTML multipart/alternative, and multipart/mixed with attachments)
 4. **internal/mailer/service.go** : Gmail API service wrapper and helper functions
 5. **pkg/auth/auth.go** : OAuth2 authentication with multi-account token storage (designed to be duplicated to google-contacts)
 
@@ -153,9 +153,16 @@ func ExpandTilde(path string) (string, error)
 ## Compose Functions (internal/mailer/compose.go)
 
 ```go
-func BuildPlainMessage(to, cc, bcc, subject, body string) string
-func BuildMessageWithAttachments(to, cc, bcc, subject, body string, attachments []string) (string, error)
+// MessageInput carries From/To/Cc/Bcc/Subject, Plain and HTML bodies, and Attachments.
+// BuildMIMEMessage picks the simplest MIME shape: text/plain; multipart/alternative
+// {text/plain, text/html} when HTML is set (a plain fallback is derived from the HTML
+// via HTMLToText when Plain is empty); wrapped in multipart/mixed when attachments exist.
+func BuildMIMEMessage(in MessageInput) (string, error)
 ```
+
+`send` and `drafts create` expose `--body` (plain), `--html` (inline HTML) and
+`--html-file` (HTML from a path); at least one body is required, `--html`/`--html-file`
+are mutually exclusive.
 
 ## Auth Functions (pkg/auth/auth.go)
 

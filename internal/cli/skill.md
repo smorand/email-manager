@@ -91,6 +91,27 @@ email-manager [--account <email>]
 
 Toute commande accepte `--help` pour voir les options détaillées.
 
+## Corps HTML (`send` et `drafts create`)
+
+Le corps peut être en texte ou en HTML :
+
+- `--body "<texte>"` : corps texte (text/plain).
+- `--html "<html>"` : corps HTML inline (petit HTML).
+- `--html-file <chemin>` : corps HTML depuis un fichier (recommandé pour un gros
+  HTML, ex. un compte rendu généré). `--html` et `--html-file` sont exclusifs.
+
+Règles :
+
+- Au moins un de `--body` / `--html` / `--html-file` est requis.
+- Avec du HTML sans `--body`, une partie `text/plain` est dérivée
+  automatiquement du HTML (multipart/alternative) pour les clients sans HTML.
+- `--attach` fonctionne avec l'un ou l'autre (le corps est alors emballé dans un
+  multipart/mixed avec les pièces jointes).
+
+```bash
+email-manager send --to X --subject "CR" --html-file compte-rendu.html --attach schema.png
+```
+
 ## Tri automatique : règle par défaut
 
 **Scanner UNIQUEMENT l'INBOX**. Les emails déjà classés dans d'autres labels

@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -21,6 +22,8 @@ var (
 	body        string
 	cc          string
 	downloadDir string
+	htmlBody    string
+	htmlFile    string
 	maxResults  int64
 	query       string
 	subject     string
@@ -293,13 +296,14 @@ func setupLabelCommands() {
 func setupDraftsCommands() {
 	createDraftCmd.Flags().StringVar(&to, "to", "", "Recipient email (required)")
 	createDraftCmd.Flags().StringVar(&subject, "subject", "", "Draft subject (required)")
-	createDraftCmd.Flags().StringVar(&body, "body", "", "Draft body (required)")
+	createDraftCmd.Flags().StringVar(&body, "body", "", "Plain-text draft body (required unless --html/--html-file is set)")
+	createDraftCmd.Flags().StringVar(&htmlBody, "html", "", "HTML draft body (inline). Adds a text/plain fallback derived from the HTML unless --body is set")
+	createDraftCmd.Flags().StringVar(&htmlFile, "html-file", "", "Path to an HTML file to use as the draft body (for large HTML)")
 	createDraftCmd.Flags().StringVar(&cc, "cc", "", "CC recipients (comma-separated)")
 	createDraftCmd.Flags().StringVar(&bcc, "bcc", "", "BCC recipients (comma-separated)")
 	createDraftCmd.Flags().StringSliceVar(&attach, "attach", []string{}, "Attachment file paths")
 	_ = createDraftCmd.MarkFlagRequired("to")
 	_ = createDraftCmd.MarkFlagRequired("subject")
-	_ = createDraftCmd.MarkFlagRequired("body")
 
 	draftsCmd.AddCommand(listDraftsCmd)
 	draftsCmd.AddCommand(createDraftCmd)
@@ -318,13 +322,14 @@ func setupSearchFlags() {
 func setupSendFlags() {
 	sendCmd.Flags().StringVar(&to, "to", "", "Recipient email (required)")
 	sendCmd.Flags().StringVar(&subject, "subject", "", "Email subject (required)")
-	sendCmd.Flags().StringVar(&body, "body", "", "Email body (required)")
+	sendCmd.Flags().StringVar(&body, "body", "", "Plain-text email body (required unless --html/--html-file is set)")
+	sendCmd.Flags().StringVar(&htmlBody, "html", "", "HTML email body (inline). Adds a text/plain fallback derived from the HTML unless --body is set")
+	sendCmd.Flags().StringVar(&htmlFile, "html-file", "", "Path to an HTML file to use as the email body (for large HTML)")
 	sendCmd.Flags().StringVar(&cc, "cc", "", "CC recipients (comma-separated)")
 	sendCmd.Flags().StringVar(&bcc, "bcc", "", "BCC recipients (comma-separated)")
 	sendCmd.Flags().StringSliceVar(&attach, "attach", []string{}, "Attachment file paths")
 	_ = sendCmd.MarkFlagRequired("to")
 	_ = sendCmd.MarkFlagRequired("subject")
-	_ = sendCmd.MarkFlagRequired("body")
 }
 
 // Command handler functions (alphabetically ordered)
@@ -553,16 +558,20 @@ func runCreateDraft(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	from := resolveFrom(service)
+	html, err := resolveHTMLBody()
+	if err != nil {
+		return err
+	}
+	if body == "" && html == "" {
+		return errNoBody
+	}
 
-	var raw string
-	if len(attach) > 0 {
-		raw, err = mailer.BuildMessageWithAttachments(from, to, cc, bcc, subject, body, attach)
-		if err != nil {
-			return fmt.Errorf("error building draft: %w", err)
-		}
-	} else {
-		raw = mailer.BuildPlainMessage(from, to, cc, bcc, subject, body)
+	raw, err := mailer.BuildMIMEMessage(mailer.MessageInput{
+		From: resolveFrom(service), To: to, Cc: cc, Bcc: bcc,
+		Subject: subject, Plain: body, HTML: html, Attachments: attach,
+	})
+	if err != nil {
+		return fmt.Errorf("error building draft: %w", err)
 	}
 
 	draft := &gmailapi.Draft{Message: &gmailapi.Message{Raw: raw}}
@@ -739,27 +748,52 @@ func runSend(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	from := resolveFrom(service)
+	html, err := resolveHTMLBody()
+	if err != nil {
+		return err
+	}
+	if body == "" && html == "" {
+		return errNoBody
+	}
 
-	var raw string
-	if len(attach) > 0 {
-		raw, err = mailer.BuildMessageWithAttachments(from, to, cc, bcc, subject, body, attach)
-		if err != nil {
-			return fmt.Errorf("error building message: %w", err)
-		}
-	} else {
-		raw = mailer.BuildPlainMessage(from, to, cc, bcc, subject, body)
+	raw, err := mailer.BuildMIMEMessage(mailer.MessageInput{
+		From: resolveFrom(service), To: to, Cc: cc, Bcc: bcc,
+		Subject: subject, Plain: body, HTML: html, Attachments: attach,
+	})
+	if err != nil {
+		return fmt.Errorf("error building message: %w", err)
 	}
 
 	msg := &gmailapi.Message{Raw: raw}
-
-	_, err = service.Users.Messages.Send("me", msg).Do()
-	if err != nil {
+	if _, err := service.Users.Messages.Send("me", msg).Do(); err != nil {
 		return fmt.Errorf("error sending email: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Email sent successfully to %s\n", to)
 	return nil
+}
+
+// errNoBody is returned when neither a plain-text nor an HTML body is provided.
+var errNoBody = errors.New("a body is required: pass --body, --html, or --html-file")
+
+// resolveHTMLBody returns the HTML body from --html or --html-file. The two
+// flags are mutually exclusive; --html-file is read from disk (with ~ expanded).
+func resolveHTMLBody() (string, error) {
+	if htmlBody != "" && htmlFile != "" {
+		return "", errors.New("use either --html or --html-file, not both")
+	}
+	if htmlFile == "" {
+		return htmlBody, nil
+	}
+	path, err := mailer.ExpandTilde(htmlFile)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("unable to read --html-file %s: %w", htmlFile, err)
+	}
+	return string(data), nil
 }
 
 // resolveFrom returns the From header value (raw "Name <email>") for the

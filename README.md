@@ -134,6 +134,11 @@ email-manager send --to "recipient@example.com" --subject "Test" --body "Message
 email-manager send --to "recipient@example.com" --subject "Report" --body "See attached" --attach /path/to/file.pdf
 email-manager send --to "recipient@example.com" --subject "Files" --body "Multiple files" --attach file1.pdf --attach file2.png
 
+# HTML body (inline, or from a file for large HTML). A text/plain fallback is
+# derived from the HTML automatically when --body is not given.
+email-manager send --to "recipient@example.com" --subject "Hi" --html "<h2>Hello</h2><p>World</p>"
+email-manager send --to "recipient@example.com" --subject "Report" --html-file report.html --attach schema.png
+
 # With specific account
 email-manager send --account work@gmail.com --to "recipient@example.com" --subject "Hello" --body "Message"
 ```
