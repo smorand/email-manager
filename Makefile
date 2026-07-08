@@ -40,6 +40,12 @@ MODULE_NAME ?= $(DEFAULT_BINARY_NAME)
 # Find all Go source files for rebuild detection
 GO_SOURCES=$(shell find . -name '*.go' -type f 2>/dev/null | grep -v '_test.go')
 
+# Assets pulled into the binary via //go:embed (e.g. internal/cli/skill.md).
+# They must be build prerequisites, otherwise editing an embedded doc/template
+# does not trigger a rebuild and `make install` ships a stale binary. Discovered
+# by resolving each //go:embed directive relative to its source file's directory.
+EMBED_SOURCES=$(shell grep -rl '//go:embed' --include='*.go' . 2>/dev/null | while read f; do d=$$(dirname $$f); grep -oE '//go:embed[[:space:]]+.+' $$f | sed -E 's|//go:embed[[:space:]]+||' | tr ' ' '\n' | while read p; do echo $$d/$$p; done; done | sort -u)
+
 # Detect if functional tests exist
 HAS_FUNCTIONAL_TESTS=$(shell [ -f tests/run_tests.sh ] && echo "yes" || echo "no")
 
@@ -66,7 +72,7 @@ $(BUILD_DIR):
 
 # Define rule template for building a single command for current platform
 define BUILD_CMD_CURRENT_RULE
-$(BUILD_DIR)/$(1)-$(CURRENT_PLATFORM): $(GO_SUM_PATH) $(GO_SOURCES) | $(BUILD_DIR)
+$(BUILD_DIR)/$(1)-$(CURRENT_PLATFORM): $(GO_SUM_PATH) $(GO_SOURCES) $(EMBED_SOURCES) | $(BUILD_DIR)
 	@echo "Building $(1) for $(CURRENT_PLATFORM)..."
 	@GOOS=$(GOOS) GOARCH=$(GOARCH) go build -o $$@ ./cmd/$(1)
 ifeq ($(GOOS),darwin)
@@ -77,7 +83,7 @@ endef
 
 # Define rule template for building a command for a specific platform
 define BUILD_CMD_PLATFORM_RULE
-$(BUILD_DIR)/$(1)-$(2)$(if $(findstring windows,$(2)),.exe,): $(GO_SUM_PATH) $(GO_SOURCES) | $(BUILD_DIR)
+$(BUILD_DIR)/$(1)-$(2)$(if $(findstring windows,$(2)),.exe,): $(GO_SUM_PATH) $(GO_SOURCES) $(EMBED_SOURCES) | $(BUILD_DIR)
 	@echo "Building $(1) for $(2)..."
 	@GOOS=$(word 1,$(subst -, ,$(2))) GOARCH=$(word 2,$(subst -, ,$(2))) go build -o $$@ ./cmd/$(1)
 ifeq ($(GOOS),darwin)
