@@ -97,6 +97,22 @@ func ExtractDraftHeaders(headers []*gmail.MessagePartHeader) (subject, to string
 	return
 }
 
+// CollectAttachmentNames walks the MIME tree recursively and returns the filenames
+// of all attachments found.
+func CollectAttachmentNames(part *gmail.MessagePart) []string {
+	if part == nil {
+		return nil
+	}
+	var names []string
+	if part.Filename != "" {
+		names = append(names, part.Filename)
+	}
+	for _, p := range part.Parts {
+		names = append(names, CollectAttachmentNames(p)...)
+	}
+	return names
+}
+
 // collectBodies walks the MIME tree recursively and returns the first text/plain
 // and text/html parts it finds (decoded).
 func collectBodies(part *gmail.MessagePart) (plain, htmlBody string) {
@@ -264,9 +280,13 @@ func ListMessagesWithDetails(service *gmail.Service, messages []*gmail.Message) 
 		}
 
 		subject, from := ExtractHeaders(fullMsg.Payload.Headers)
+		attachments := CollectAttachmentNames(fullMsg.Payload)
 		fmt.Printf("ID: %s\n", msg.Id)
 		fmt.Printf("From: %s\n", from)
 		fmt.Printf("Subject: %s\n", subject)
+		if len(attachments) > 0 {
+			fmt.Printf("📎 %s\n", strings.Join(attachments, ", "))
+		}
 		fmt.Println("---")
 	}
 	return nil

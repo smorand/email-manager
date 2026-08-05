@@ -656,6 +656,9 @@ func runGet(cmd *cobra.Command, args []string) error {
 			fmt.Printf("%s: %s\n", header.Name, header.Value)
 		}
 	}
+	if attachments := mailer.CollectAttachmentNames(msg.Payload); len(attachments) > 0 {
+		fmt.Printf("📎 %s\n", strings.Join(attachments, ", "))
+	}
 
 	// Print body
 	fmt.Println("\n" + strings.Repeat("=", 80))
