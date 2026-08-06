@@ -26,6 +26,7 @@ var (
 	htmlFile    string
 	maxResults  int64
 	query       string
+	replyTo     string
 	subject     string
 	to          string
 )
@@ -295,15 +296,15 @@ func setupLabelCommands() {
 
 func setupDraftsCommands() {
 	createDraftCmd.Flags().StringVar(&to, "to", "", "Recipient email (required)")
-	createDraftCmd.Flags().StringVar(&subject, "subject", "", "Draft subject (required)")
+	createDraftCmd.Flags().StringVar(&subject, "subject", "", "Draft subject (derived from --reply-to if omitted)")
 	createDraftCmd.Flags().StringVar(&body, "body", "", "Plain-text draft body (required unless --html/--html-file is set)")
 	createDraftCmd.Flags().StringVar(&htmlBody, "html", "", "HTML draft body (inline). Adds a text/plain fallback derived from the HTML unless --body is set")
 	createDraftCmd.Flags().StringVar(&htmlFile, "html-file", "", "Path to an HTML file to use as the draft body (for large HTML)")
 	createDraftCmd.Flags().StringVar(&cc, "cc", "", "CC recipients (comma-separated)")
 	createDraftCmd.Flags().StringVar(&bcc, "bcc", "", "BCC recipients (comma-separated)")
 	createDraftCmd.Flags().StringSliceVar(&attach, "attach", []string{}, "Attachment file paths")
+	createDraftCmd.Flags().StringVar(&replyTo, "reply-to", "", "Message-ID (or Gmail message ID) to reply to; sets In-Reply-To, References, thread, and subject")
 	_ = createDraftCmd.MarkFlagRequired("to")
-	_ = createDraftCmd.MarkFlagRequired("subject")
 
 	draftsCmd.AddCommand(listDraftsCmd)
 	draftsCmd.AddCommand(createDraftCmd)
@@ -566,15 +567,57 @@ func runCreateDraft(cmd *cobra.Command, args []string) error {
 		return errNoBody
 	}
 
+	// Threading: fetch original message headers when --reply-to is set.
+	var inReplyTo, references, threadID string
+	if replyTo != "" {
+		orig, err := service.Users.Messages.Get("me", replyTo).Format("metadata").MetadataHeaders("Message-ID", "References", "Subject").Do()
+		if err != nil {
+			return fmt.Errorf("error fetching original message %s: %w", replyTo, err)
+		}
+		threadID = orig.ThreadId
+		var origMessageID, origReferences, origSubject string
+		for _, h := range orig.Payload.Headers {
+			switch h.Name {
+			case "Message-ID":
+				origMessageID = h.Value
+			case "References":
+				origReferences = h.Value
+			case "Subject":
+				origSubject = h.Value
+			}
+		}
+		inReplyTo = origMessageID
+		if origReferences != "" {
+			references = origReferences + " " + origMessageID
+		} else {
+			references = origMessageID
+		}
+		// Use original subject with "Re: " prefix when no explicit subject was given.
+		if subject == "" {
+			if strings.HasPrefix(strings.ToLower(origSubject), "re:") {
+				subject = origSubject
+			} else {
+				subject = "Re: " + origSubject
+			}
+		}
+	} else if subject == "" {
+		return fmt.Errorf("--subject is required when --reply-to is not set")
+	}
+
 	raw, err := mailer.BuildMIMEMessage(mailer.MessageInput{
 		From: resolveFrom(service), To: to, Cc: cc, Bcc: bcc,
 		Subject: subject, Plain: body, HTML: html, Attachments: attach,
+		InReplyTo: inReplyTo, References: references,
 	})
 	if err != nil {
 		return fmt.Errorf("error building draft: %w", err)
 	}
 
-	draft := &gmailapi.Draft{Message: &gmailapi.Message{Raw: raw}}
+	msg := &gmailapi.Message{Raw: raw}
+	if threadID != "" {
+		msg.ThreadId = threadID
+	}
+	draft := &gmailapi.Draft{Message: msg}
 
 	created, err := service.Users.Drafts.Create("me", draft).Do()
 	if err != nil {

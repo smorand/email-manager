@@ -75,6 +75,8 @@ type MessageInput struct {
 	Plain       string
 	HTML        string
 	Attachments []string
+	InReplyTo   string
+	References  string
 }
 
 // BuildMIMEMessage builds an outgoing message and returns it base64url encoded
@@ -141,6 +143,12 @@ func writeHeaders(msg *strings.Builder, in MessageInput) {
 		fmt.Fprintf(msg, "Bcc: %s\r\n", encodeAddressList(in.Bcc))
 	}
 	fmt.Fprintf(msg, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", in.Subject))
+	if in.InReplyTo != "" {
+		fmt.Fprintf(msg, "In-Reply-To: %s\r\n", in.InReplyTo)
+	}
+	if in.References != "" {
+		fmt.Fprintf(msg, "References: %s\r\n", in.References)
+	}
 	msg.WriteString("MIME-Version: 1.0\r\n")
 }
 
