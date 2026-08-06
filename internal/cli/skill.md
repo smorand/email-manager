@@ -84,6 +84,7 @@ email-manager [--account <email>]
 ├── drafts
 │   ├── list
 │   ├── create --to ... --subject ... --body ... [--cc ...] [--bcc ...] [--attach ...]
+│   │            [--reply-to <message-id>]  # thread le brouillon en réponse à un mail existant
 │   └── delete <draft-id>
 └── skill                   # Imprime ce mode d'emploi
     └── learn --rule "..."  # Apprend une règle de tri (validation utilisateur)
@@ -111,6 +112,24 @@ Règles :
 ```bash
 email-manager send --to X --subject "CR" --html-file compte-rendu.html --attach schema.png
 ```
+
+## Brouillons en réponse (`drafts create --reply-to`)
+
+Pour créer un brouillon threadé (réponse dans un fil existant), utiliser `--reply-to <message-id>` :
+
+```bash
+email-manager --account <email> drafts create \\
+  --to destinataire@example.com \\
+  --reply-to <MESSAGE_ID> \\
+  --body "Corps de la réponse"
+```
+
+- `--reply-to` accepte l'ID Gmail du message original (ex: `19f6c544aa3b26a6`).
+- `--subject` devient optionnel : si absent, le sujet est auto-dérivé du message original avec le préfixe "Re: ".
+- Les headers `In-Reply-To` et `References` sont posés automatiquement (RFC 2822).
+- Le brouillon est attaché au même thread Gmail — il apparaît dans le bon fil dans l'interface.
+- Utile pour préparer une réponse sans envoyer : l'utilisateur ouvre le brouillon dans Gmail et envoie quand il veut.
+
 
 ## Tri automatique : règle par défaut
 
