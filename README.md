@@ -249,10 +249,19 @@ email-manager drafts delete <draft-id>
 
 ### Google Calendar (`cal`)
 
-All `cal` subcommands accept `--calendar-id` (default `primary`) and
-`--account`, like the mail commands. `--notify` defaults to `none` on
+All `cal` subcommands accept `--calendar-id` (default `primary`), `--json`,
+and `--account`, like the mail commands. `--notify` defaults to `none` on
 `add`/`update`/`delete`/`respond`: attendees are never emailed unless you
 pass `--notify all` (or `externalOnly`) explicitly.
+
+`--json` switches any `cal` subcommand from human-readable text to raw JSON
+(the underlying Calendar API objects, full fidelity), for scripting or
+agent parsing:
+
+```bash
+email-manager cal list --start 2026-01-05T00:00:00+01:00 --end 2026-01-12T00:00:00+01:00 --json
+email-manager cal get <event-id> --json
+```
 
 ```bash
 # List calendars visible to the account

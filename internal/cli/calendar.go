@@ -4,6 +4,7 @@ package cli
 // sharing the same multi-account OAuth token as the Gmail commands in cli.go.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -24,6 +25,7 @@ var (
 	calEnd        string
 	calFree       bool
 	calBusy       bool
+	calJSON       bool
 	calMax        int64
 	calMeet       bool
 	calNotify     string
@@ -121,6 +123,7 @@ var (
 
 func setupCalendarCommands() {
 	calCmd.PersistentFlags().StringVar(&calCalendarID, "calendar-id", gcalsvc.DefaultCalendarID, "Calendar ID")
+	calCmd.PersistentFlags().BoolVar(&calJSON, "json", false, "Output raw JSON instead of human-readable text")
 
 	calListCmd.Flags().StringVar(&calStart, "start", "", "Window start, RFC3339 (required)")
 	calListCmd.Flags().StringVar(&calEnd, "end", "", "Window end, RFC3339 (required)")
@@ -214,6 +217,19 @@ func setupCalUpdateFlags() {
 // calLocation is shared between add/update, distinct from the mail "location"-less flags above.
 var calLocation string
 
+// printCalJSON marshals v (a Calendar API struct, or slice thereof, which
+// already carries `json:"..."` tags) as indented JSON on stdout. Used by
+// every `cal` subcommand when --json is passed, so agents can parse output
+// reliably instead of scraping the human-readable text format.
+func printCalJSON(v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error encoding JSON: %w", err)
+	}
+	fmt.Println(string(data))
+	return nil
+}
+
 // Command handlers
 
 func runCalCalendarsList(cmd *cobra.Command, args []string) error {
@@ -227,6 +243,9 @@ func runCalCalendarsList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error listing calendars: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(resp.Items)
+	}
 	for _, entry := range resp.Items {
 		primary := ""
 		if entry.Primary {
@@ -262,6 +281,9 @@ func runCalList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error listing events: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(resp.Items)
+	}
 	if len(resp.Items) == 0 {
 		fmt.Fprintf(os.Stderr, "No events found\n")
 		return nil
@@ -283,6 +305,9 @@ func runCalGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error getting event: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(ev)
+	}
 	printEventDetails(ev)
 	return nil
 }
@@ -340,6 +365,9 @@ func runCalInstances(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error listing instances: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(resp.Items)
+	}
 	if len(resp.Items) == 0 {
 		fmt.Fprintf(os.Stderr, "No instances found in this window\n")
 		return nil
@@ -378,6 +406,9 @@ func runCalAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error creating event: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(created)
+	}
 	fmt.Fprintf(os.Stderr, "Event created (ID: %s)\n", created.Id)
 	if meet := gcalsvc.MeetLink(created); meet != "" {
 		fmt.Fprintf(os.Stderr, "Meet link: %s\n", meet)
@@ -419,6 +450,9 @@ func runCalUpdate(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error updating event: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(result)
+	}
 	fmt.Fprintf(os.Stderr, "Event updated (ID: %s)\n", result.Id)
 	if meet := gcalsvc.MeetLink(result); meet != "" {
 		fmt.Fprintf(os.Stderr, "Meet link: %s\n", meet)
@@ -439,6 +473,9 @@ func runCalDelete(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error deleting event: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(map[string]any{"id": args[0], "deleted": true})
+	}
 	fmt.Fprintf(os.Stderr, "Event deleted\n")
 	return nil
 }
@@ -476,6 +513,9 @@ func runCalRespond(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error responding to event: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(updated)
+	}
 	fmt.Fprintf(os.Stderr, "Responded %s to event %s\n", status, updated.Id)
 	return nil
 }
@@ -491,6 +531,9 @@ func runCalQuickAdd(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error creating quick-add event: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(created)
+	}
 	fmt.Fprintf(os.Stderr, "Event created (ID: %s)\n", created.Id)
 	fmt.Println(gcalsvc.FormatEventLine(created))
 	return nil
@@ -516,6 +559,9 @@ func runCalFreebusy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("error querying freebusy: %w", err)
 	}
 
+	if calJSON {
+		return printCalJSON(resp)
+	}
 	for calID, info := range resp.Calendars {
 		fmt.Printf("%s:\n", calID)
 		if len(info.Errors) > 0 {

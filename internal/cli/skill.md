@@ -281,8 +281,22 @@ d'agir (`email-manager accounts`, puis `--account <email>`).
 
 ### Commandes `cal`
 
+Toute commande `cal` accepte `--json` (flag persistant sur `cal`) pour une
+sortie JSON brute plutôt que du texte formaté pour humain — **à utiliser
+systématiquement quand le résultat doit être parsé par un agent/script** au
+lieu de scraper le texte. Le JSON expose directement les objets de l'API
+Google Calendar (tous les champs, pas un sous-ensemble) : `cal list`/`cal
+instances`/`cal calendars list` renvoient un tableau JSON, `cal
+get`/`add`/`update`/`respond`/`quick-add` un objet event, `cal freebusy` la
+réponse freebusy brute, `cal delete` `{"id": "...", "deleted": true}`.
+
+```bash
+email-manager cal list --start ... --end ... --json
+email-manager cal get <event-id> --json
 ```
-email-manager cal [--calendar-id primary]
+
+```
+email-manager cal [--calendar-id primary] [--json]
 ├── calendars list                         # Calendriers visibles (id, primary, accessRole)
 ├── list --start <RFC3339> --end <RFC3339> [--query TEXT] [--max 50] [--timezone Europe/Paris]
 ├── get <event-id>                         # Détails : attendees+statut, lien Meet, récurrence, rappels

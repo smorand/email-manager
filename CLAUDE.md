@@ -104,6 +104,15 @@ delete would warrant.
 invitation/notification email is sent to attendees unless `--notify all` (or
 `externalOnly`) is passed explicitly.
 
+Every `cal` subcommand also accepts `--json` (persistent flag on `calCmd`):
+prints the raw Calendar API struct(s) via `printCalJSON` (encoding/json on
+the `google.golang.org/api/calendar/v3` types directly, which already carry
+`json:"..."` tags) instead of the human-readable text format. `list`/
+`instances`/`calendars list` emit a JSON array; `get`/`add`/`update`/
+`respond`/`quick-add` emit a single event object; `freebusy` emits the raw
+freebusy response; `delete` (which has no response body) emits
+`{"id":..., "deleted": true}`.
+
 ### Multi-account Logic
 
 - `--account` is a persistent flag on the root command
