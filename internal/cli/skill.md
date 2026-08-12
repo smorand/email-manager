@@ -86,6 +86,7 @@ email-manager [--account <email>]
 │   ├── create --to ... --subject ... --body ... [--cc ...] [--bcc ...] [--attach ...]
 │   │            [--reply-to <message-id>]  # thread le brouillon en réponse à un mail existant
 │   └── delete <draft-id>
+├── cal                     # Agenda Google Calendar — voir section "Agenda" ci-dessous
 └── skill                   # Imprime ce mode d'emploi
     └── learn --rule "..."  # Apprend une règle de tri (validation utilisateur)
 ```
@@ -242,6 +243,109 @@ Trois fichiers sont attendus (créés à la demande) dans
 
 Ces fichiers sont automatiquement inclus dans la sortie de
 `email-manager skill` quand ils existent.
+
+## Agenda (Google Calendar)
+
+Déclencheurs typiques (français) :
+
+- "mon agenda", "mon planning", "mes rendez-vous"
+- "ajoute un rendez-vous / événement", "bloque un créneau", "planifie une réunion"
+- "quand est mon prochain call/rdv", "suis-je libre le..."
+- "annule le rendez-vous X", "déplace le rendez-vous X"
+- "accepte / décline / réponds tentative à l'invitation Y"
+- "crée un lien Google Meet"
+
+Même règle multi-comptes que l'email : déterminer le compte cible avant
+d'agir (`email-manager accounts`, puis `--account <email>`).
+
+### Date/heure courante : OBLIGATOIRE avant toute opération temporelle
+
+**Avant tout calcul de date relative ("aujourd'hui", "hier", "demain",
+"cette semaine", "le prochain rendez-vous", "mes events" sans date précisée,
+...), vérifier la date et l'heure réelles actuelles** (ex: commande shell
+`date`), ne jamais les déduire d'une date d'entraînement ou d'un présupposé.
+
+- "Aujourd'hui", "demain", "cette semaine" sont ancrés sur la date réelle du
+  jour où la commande est exécutée, pas sur une date supposée par l'agent.
+- Quand l'utilisateur demande "mes prochains events" / "mon agenda" /
+  "suis-je libre" **sans préciser de date**, cela veut dire **à partir de
+  maintenant (date/heure réelle courante) et dans le futur** — jamais une
+  fenêtre calculée à partir d'une date erronée. Un "prochain rendez-vous"
+  cherché avec un `--start` déjà passé par rapport à la vraie date du jour
+  renverra des résultats obsolètes ou vides sans que ce soit une erreur
+  d'API : c'est une erreur de raisonnement temporel de l'agent à corriger
+  avant l'appel.
+- Cette règle s'applique à `cal list`, `cal instances`, `cal freebusy`, et à
+  tout `--start`/`--end` construit implicitement pour une demande sans date
+  explicite.
+
+### Commandes `cal`
+
+```
+email-manager cal [--calendar-id primary]
+├── calendars list                         # Calendriers visibles (id, primary, accessRole)
+├── list --start <RFC3339> --end <RFC3339> [--query TEXT] [--max 50] [--timezone Europe/Paris]
+├── get <event-id>                         # Détails : attendees+statut, lien Meet, récurrence, rappels
+├── instances <event-id> --start ... --end ...   # Occurrences d'un événement récurrent
+├── add --summary/-s ... --start ... --end ...
+│        [--all-day] [--timezone Europe/Paris] [--location ...] [--description ...]
+│        [--attendee EMAIL ...] [--recurrence RRULE ...] [--reminder-minutes N ...]
+│        [--color-id ID] [--visibility default|public|private] [--busy | --free]
+│        [--meet] [--notify none|all|externalOnly]
+├── update <event-id> [mêmes flags que add, tous optionnels] [--notify ...]
+│        # PATCH partiel : seuls les flags explicitement passés sont modifiés
+├── delete <event-id> [--notify none|all|externalOnly]   # DÉFINITIF, pas d'undo API
+├── respond <event-id> --status accepted|declined|tentative [--comment TEXT] [--notify ...]
+├── quick-add --text "Dinner with Sara Fri at 7pm"        # NLP Google, spécifique Calendar
+└── freebusy --calendar ID [--calendar ID2 ...] --start ... --end ...   # Créneaux occupés
+```
+
+### Format des dates
+
+- `--start`/`--end` : RFC3339 avec timezone (ex: `2026-01-05T09:00:00`, timezone
+  posée séparément via `--timezone`, défaut `Europe/Paris`), ou date
+  `YYYY-MM-DD` avec `--all-day`.
+- `--recurrence` : chaîne RRULE brute (RFC5545), ex :
+  `RRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=10`. Passée telle quelle, pas de
+  traduction depuis du langage naturel (sauf via `quick-add`, qui lui accepte
+  du texte libre en anglais).
+
+### Règle `--notify` : PAS d'invitation par défaut
+
+`--notify` vaut `none` par défaut sur `add`/`update`/`delete`/`respond` :
+**aucun email n'est envoyé aux participants tant que `--notify all` n'est pas
+passé explicitement.** Quand une commande ajoute/modifie/retire des
+participants avec `--notify none` (défaut), le binaire affiche un
+avertissement stderr le rappelant.
+
+**Comportement agent obligatoire :**
+
+- Si des participants sont ajoutés/modifiés et que l'utilisateur attend une
+  vraie invitation envoyée par email, informer l'utilisateur et proposer
+  explicitement `--notify all` — ne jamais l'ajouter silencieusement.
+- **Toujours demander confirmation avant `cal delete`** (suppression
+  définitive, aucun undo côté API Google, contrairement à `trash` côté mail).
+- **Toujours demander confirmation avant tout `--notify all`** (envoie un
+  email à des tiers).
+
+### Google Meet
+
+`--meet` sur `cal add` (ou `cal update`) attache un lien Google Meet
+généré par Google (`conferenceDataVersion=1`). Le lien apparaît dans la
+sortie de `add`/`update` et dans `cal get`/`cal list` (marqueur `[meet]`).
+
+### Scope OAuth Calendar
+
+Si une commande `cal ...` échoue avec une erreur 403 / scope manquant sur un
+compte déjà authentifié pour le mail, c'est que ce compte n'a pas encore le
+scope Calendar (ajouté après sa première authentification). Relancer :
+
+```bash
+email-manager auth --account <email>
+```
+
+Ceci est un cas normal pour tout compte authentifié avant l'ajout du support
+calendrier, pas une erreur à corriger dans le code.
 
 ## Authentification
 

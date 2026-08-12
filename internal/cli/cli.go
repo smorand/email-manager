@@ -222,6 +222,7 @@ func Init() {
 	setupDownloadAttachmentsFlags()
 	setupLabelCommands()
 	setupDraftsCommands()
+	setupCalendarCommands()
 	setupSkillCommand()
 	getCmd.Flags().BoolVar(&getBodyHTML, "html", false, "Return raw HTML body instead of plain text")
 
@@ -242,6 +243,7 @@ func Init() {
 	RootCmd.AddCommand(downloadAttachmentsCmd)
 	RootCmd.AddCommand(labelsCmd)
 	RootCmd.AddCommand(draftsCmd)
+	RootCmd.AddCommand(calCmd)
 	RootCmd.AddCommand(skillCmd)
 }
 

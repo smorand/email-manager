@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	calendar "google.golang.org/api/calendar/v3"
 	gmail "google.golang.org/api/gmail/v1"
 	people "google.golang.org/api/people/v1"
 )
@@ -54,11 +55,13 @@ const (
 	oauthShutdownTimeout = 5 * time.Second
 )
 
-// Scopes contains all OAuth2 scopes for Gmail and People APIs.
-// These unified scopes enable a single OAuth consent for both email-manager
-// and google-contacts applications, using the same token file.
+// Scopes contains all OAuth2 scopes for Gmail, People, and Calendar APIs.
+// These unified scopes enable a single OAuth consent for email-manager's
+// mail and calendar features and for google-contacts, using the same token
+// file. Adding a scope here requires every already-authenticated account to
+// re-run `email-manager auth --account <email>` once to pick it up.
 var Scopes = []string{
-	// Gmail API scopes (for email-manager)
+	// Gmail API scopes (for email-manager mail commands)
 	gmail.GmailModifyScope,
 	gmail.GmailSendScope,
 	gmail.GmailLabelsScope,
@@ -69,6 +72,10 @@ var Scopes = []string{
 	// People API scopes (for google-contacts)
 	people.ContactsScope,
 	people.ContactsOtherReadonlyScope,
+	// Calendar API scope (for email-manager cal commands). Full access is
+	// required (not the read-only or events-only scopes) because freebusy,
+	// quick-add, and calendarList all fall outside the events-only scope.
+	calendar.CalendarScope,
 }
 
 // GetCredentialsPath returns the path to the credentials directory.

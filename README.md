@@ -1,10 +1,12 @@
 # Email Manager
 
-A command-line interface (CLI) tool for managing Gmail emails using the Gmail API v1. Supports multiple Gmail accounts.
+A command-line interface (CLI) tool for managing Gmail emails and Google
+Calendar using the Gmail API v1 and Calendar API v3. Supports multiple
+Google accounts.
 
 ## Features
 
-- Multi-account support: manage multiple Gmail accounts with `--account` flag
+- Multi-account support: manage multiple Google accounts with `--account` flag
 - Send emails with CC, BCC, and attachments
 - Manage drafts (list, create with attachments, delete)
 - List and search messages
@@ -13,6 +15,9 @@ A command-line interface (CLI) tool for managing Gmail emails using the Gmail AP
 - Mark / unmark spam
 - Download message attachments
 - Manage Gmail labels (list, create, apply, remove)
+- Google Calendar: list/get/add/update/delete events, recurring events
+  (RRULE) and their occurrences, attendees and invitation responses,
+  reminders, Google Meet links, natural-language quick-add, free/busy queries
 - OAuth2 authentication with Google
 - Self-documenting via `email-manager skill` for AI agent integration
 
@@ -56,7 +61,7 @@ make uninstall
 
 ## Setup
 
-1. Create a Google Cloud Project and enable Gmail API and People API
+1. Create a Google Cloud Project and enable Gmail API, People API, and Google Calendar API
 2. Create OAuth2 credentials (Web application) with redirect URI `http://localhost:8002/oauth2callback`
 3. Download the credentials JSON file
 4. Set the `GOOGLE_CREDENTIALS_FILE` environment variable to point to your credentials file:
@@ -103,9 +108,12 @@ This removes the old token and opens a browser for fresh authentication. The too
 
 This application shares OAuth credentials (client_id/secret) with the `google-contacts` project. Both applications use:
 - Same credentials file: `~/.credentials/google_credentials.json`
-- Combined scopes: Gmail API + People API
+- Combined scopes: Gmail API + People API + Calendar API
 
 Token files are stored per-account in `~/.cache/email-manager/`.
+
+Accounts authenticated before Calendar support was added need to re-run
+`email-manager auth --account <email>` once to pick up the new scope.
 
 ## Usage
 
@@ -239,6 +247,56 @@ email-manager drafts create --to "..." --subject "..." --body "..." --attach fil
 email-manager drafts delete <draft-id>
 ```
 
+### Google Calendar (`cal`)
+
+All `cal` subcommands accept `--calendar-id` (default `primary`) and
+`--account`, like the mail commands. `--notify` defaults to `none` on
+`add`/`update`/`delete`/`respond`: attendees are never emailed unless you
+pass `--notify all` (or `externalOnly`) explicitly.
+
+```bash
+# List calendars visible to the account
+email-manager cal calendars list
+
+# List events in a time window
+email-manager cal list --start 2026-01-05T00:00:00 --end 2026-01-12T00:00:00
+
+# Get full event details (attendees, Meet link, recurrence, reminders)
+email-manager cal get <event-id>
+
+# Create an event with attendees, a Google Meet link, and reminders
+email-manager cal add --summary "Planning" \
+  --start 2026-01-05T09:00:00 --end 2026-01-05T09:30:00 \
+  --attendee alice@example.com --meet --reminder-minutes 10 --notify all
+
+# Weekly recurring event
+email-manager cal add --summary "Standup" \
+  --start 2026-01-05T09:00:00 --end 2026-01-05T09:15:00 \
+  --recurrence "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=20"
+
+# All-day event
+email-manager cal add --summary "Vacation" --all-day --start 2026-07-14 --end 2026-07-15
+
+# List the occurrences of a recurring event
+email-manager cal instances <event-id> --start 2026-01-01T00:00:00 --end 2026-03-01T00:00:00
+
+# Update only the location (partial patch, other fields untouched)
+email-manager cal update <event-id> --location "Room 2"
+
+# Respond to an invitation
+email-manager cal respond <event-id> --status accepted
+
+# Delete an event (permanent, no undo, confirm first)
+email-manager cal delete <event-id>
+
+# Natural-language quick-add
+email-manager cal quick-add --text "Dinner with Sara Fri at 7pm"
+
+# Check free/busy across calendars
+email-manager cal freebusy --calendar primary --calendar colleague@example.com \
+  --start 2026-01-05T00:00:00 --end 2026-01-05T23:59:59
+```
+
 ## Use with AI agent coding tools
 
 `email-manager` is self-documenting for AI agents (Claude Code, Cursor,
@@ -258,10 +316,10 @@ guide and workflows.
 
 The agent will execute `email-manager skill` on demand, retrieving:
 
-- The current command list
+- The current command list (mail and `cal`)
 - The multi-account workflow
 - Default rules (INBOX-only scanning, destination labels, confirmation
-  policies)
+  policies, `cal delete`/`--notify all` confirmation policy)
 - Any user-specific knowledge stored under `~/.config/email-manager/*.md`
 
 ### Teaching new rules to the agent
@@ -329,12 +387,16 @@ email-manager/
 │       └── main.go           # Entry point
 ├── internal/
 │   ├── cli/
-│   │   ├── cli.go            # CLI command implementations
+│   │   ├── cli.go            # Mail CLI command implementations
+│   │   ├── calendar.go       # `cal` command tree (Google Calendar)
 │   │   ├── skill.go          # 'skill' / 'skill learn' commands
 │   │   └── skill.md          # Embedded agent skill (//go:embed)
-│   └── mailer/
-│       ├── compose.go        # Email composition (plain and multipart MIME)
-│       └── service.go        # Gmail API service
+│   ├── mailer/
+│   │   ├── compose.go        # Email composition (plain and multipart MIME)
+│   │   └── service.go        # Gmail API service
+│   └── calendar/
+│       ├── event.go          # Event building / partial-patch logic
+│       └── service.go        # Calendar API service and helpers
 └── pkg/
     └── auth/
         └── auth.go           # OAuth2 authentication (multi-account)

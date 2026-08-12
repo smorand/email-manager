@@ -4,7 +4,7 @@
 
 **Type**: CLI Application
 **Language**: Go 1.25+
-**Purpose**: Gmail management via Gmail API v1 (multi-account)
+**Purpose**: Gmail and Google Calendar management via Gmail API v1 and Calendar API v3 (multi-account)
 **Authentication**: OAuth2 with Google (per-account tokens)
 **CLI Framework**: Cobra
 
@@ -24,12 +24,16 @@ email-manager/
 │       └── main.go           # Entry point (minimal)
 ├── internal/
 │   ├── cli/
-│   │   ├── cli.go            # CLI commands, flags, multi-account logic
+│   │   ├── cli.go            # Mail CLI commands, flags, multi-account logic
+│   │   ├── calendar.go       # `cal` command tree (Google Calendar)
 │   │   ├── skill.go          # 'skill' / 'skill learn' commands
 │   │   └── skill.md          # Embedded mode d'emploi (//go:embed)
-│   └── mailer/
-│       ├── compose.go        # Email composition (plain text and multipart MIME)
-│       └── service.go        # Gmail API service and helpers
+│   ├── mailer/
+│   │   ├── compose.go        # Email composition (plain text and multipart MIME)
+│   │   └── service.go        # Gmail API service and helpers
+│   └── calendar/
+│       ├── event.go          # EventInput -> *calendar.Event, partial-patch application
+│       └── service.go        # Calendar API service and helpers (formatting, notify validation)
 └── pkg/
     └── auth/
         └── auth.go           # OAuth2 authentication (multi-account, shared with google-contacts)
@@ -40,10 +44,13 @@ email-manager/
 ### Core Packages
 
 1. **cmd/email-manager/main.go** : Minimal entry point, initializes CLI and executes
-2. **internal/cli/cli.go** : Command definitions, flag setup, command handlers, account resolution
-3. **internal/mailer/compose.go** : Email message composition (BuildMIMEMessage: text/plain, HTML multipart/alternative, and multipart/mixed with attachments)
-4. **internal/mailer/service.go** : Gmail API service wrapper and helper functions
-5. **pkg/auth/auth.go** : OAuth2 authentication with multi-account token storage (designed to be duplicated to google-contacts)
+2. **internal/cli/cli.go** : Mail command definitions, flag setup, command handlers, account resolution
+3. **internal/cli/calendar.go** : `cal` command tree (calendars/list/get/instances/add/update/delete/respond/quick-add/freebusy)
+4. **internal/mailer/compose.go** : Email message composition (BuildMIMEMessage: text/plain, HTML multipart/alternative, and multipart/mixed with attachments)
+5. **internal/mailer/service.go** : Gmail API service wrapper and helper functions
+6. **internal/calendar/event.go** : `EventInput.ToEvent()` builds a new `*calendar.Event` (recurrence, attendees, reminders, transparency, Meet conferenceData); `ApplyPatch()` mutates only the cobra-`Changed()` fields for partial PATCH semantics
+7. **internal/calendar/service.go** : `GetService`, `ValidateNotify`, and display helpers (`FormatEventLine`, `MeetLink`, `EventTime`, `FindSelfAttendee`)
+8. **pkg/auth/auth.go** : OAuth2 authentication with multi-account token storage (designed to be duplicated to google-contacts)
 
 ### Command Structure
 
@@ -72,12 +79,30 @@ email-manager [--account <email>]
 │   ├── list             # List drafts
 │   ├── create           # Create draft (same flags as send)
 │   └── delete           # Delete draft
+├── cal [--calendar-id primary]
+│   ├── calendars list   # List calendars visible to the account
+│   ├── list             # List events in a time window (--start/--end RFC3339)
+│   ├── get <event-id>   # Event details (attendees, Meet link, recurrence, reminders)
+│   ├── instances <event-id>  # Occurrences of a recurring event
+│   ├── add              # Create an event (recurrence, attendees, reminders, --meet, ...)
+│   ├── update <event-id>     # Partial PATCH: only explicitly-passed flags are applied
+│   ├── delete <event-id>     # Permanent delete, no undo (Calendar API has none)
+│   ├── respond <event-id>    # Accept/decline/tentative on an invitation
+│   ├── quick-add        # Create an event from natural language text (Google NLP)
+│   └── freebusy          # Query busy time slots across one or more calendars
 └── skill                # Print agent skill (mode d'emploi for AI agents)
     └── learn            # Persist a learned rule (--rule "...")
 ```
 
 The binary deliberately exposes only `trash` (reversible) and not a hard
-delete: permanent deletion is left to the Gmail web UI.
+delete for mail: permanent deletion is left to the Gmail web UI. `cal delete`
+has no such reversible alternative (the Calendar API itself has no undo), so
+it is a real permanent delete — treat it with the same caution as a hard
+delete would warrant.
+
+`cal add`/`update`/`delete`/`respond` default `--notify` to `none`: no
+invitation/notification email is sent to attendees unless `--notify all` (or
+`externalOnly`) is passed explicitly.
 
 ### Multi-account Logic
 
@@ -91,8 +116,9 @@ delete: permanent deletion is left to the Gmail web UI.
 
 - `github.com/spf13/cobra` : CLI framework
 - `google.golang.org/api/gmail/v1` : Gmail API client
+- `google.golang.org/api/calendar/v3` : Calendar API client
+- `github.com/google/uuid` : Conference (Google Meet) create-request IDs
 - `golang.org/x/oauth2` : OAuth2 authentication
-- `github.com/fatih/color` : Terminal colors
 
 ## Authentication Flow
 
@@ -121,18 +147,26 @@ The `pkg/auth/auth.go` package is designed to be **duplicated** (not shared as a
 
 ### Unified OAuth2 Scopes
 
-The auth package includes ALL scopes for both applications:
+The auth package includes ALL scopes for both applications, plus Calendar:
 
 ```go
-// Gmail API scopes (for email-manager)
+// Gmail API scopes (for email-manager mail commands)
 gmail.GmailModifyScope
 gmail.GmailSendScope
 gmail.GmailLabelsScope
+gmail.GmailSettingsBasicScope
 
 // People API scopes (for google-contacts)
 people.ContactsScope
 people.ContactsOtherReadonlyScope
+
+// Calendar API scope (for email-manager cal commands)
+calendar.CalendarScope
 ```
+
+`calendar.CalendarScope` (full access, not events-only) is required because
+`freebusy`, `quick-add`, and `calendarList` all fall outside the narrower
+events scope.
 
 **Important**: Adding new scopes requires re-authorization per account:
 ```bash
@@ -175,6 +209,23 @@ func ListAccounts() ([]string, error)
 func RemoveToken(account string) error
 ```
 
+## Calendar Functions (internal/calendar)
+
+```go
+// service.go
+func GetService(ctx context.Context, account string) (*calendar.Service, error)
+func ValidateNotify(notify string) error   // "none" | "all" | "externalOnly"
+func EventTime(dt *calendar.EventDateTime) string
+func FormatEventLine(ev *calendar.Event) string
+func MeetLink(ev *calendar.Event) string
+func FindSelfAttendee(ev *calendar.Event, account string) *calendar.EventAttendee
+
+// event.go
+type EventInput struct { /* Summary, Start/End, AllDay, TimeZone, Attendees, Recurrence, ReminderMinutes, ColorID, Visibility, Busy *bool, ConferenceMeet */ }
+func (in EventInput) ToEvent() *calendar.Event                                  // used by `cal add`
+func ApplyPatch(ev *calendar.Event, in EventInput, changed Changed) *calendar.Event  // used by `cal update`, only mutates cobra-Changed() fields
+```
+
 ## Development Workflow
 
 ### Build and Test
@@ -197,16 +248,23 @@ make uninstall  # Remove from system
 
 ### Common Tasks
 
-**Add new command**:
+**Add new mail command**:
 1. Create command variable in `internal/cli/cli.go`
 2. Implement `RunE` function
 3. Register in `Init()` function with `RootCmd.AddCommand()`
 4. All handlers receive `account` from the resolved global variable
 5. **Update `internal/cli/skill.md`** so AI agents see the new command (see "Skill maintenance" below)
 
+**Add new `cal` subcommand**:
+1. Create command variable + flags in `internal/cli/calendar.go`
+2. Implement `RunE` function using `gcalsvc.GetService(cmd.Context(), account)`
+3. Register under `calCmd` in `setupCalendarCommands()`
+4. If it builds/patches an event, extend `EventInput`/`ToEvent`/`ApplyPatch` in `internal/calendar/event.go` rather than constructing `*calendar.Event` inline
+5. **Update `internal/cli/skill.md`** ("Agenda (Google Calendar)" section) in the same commit
+
 **Add OAuth scope**:
 1. Update `Scopes` slice in `pkg/auth/auth.go`
-2. Re-authenticate affected accounts
+2. Re-authenticate affected accounts: `email-manager auth --account <email>`
 
 ## File Locations
 
@@ -218,19 +276,21 @@ make uninstall  # Remove from system
 
 ## Testing
 
-Recommended test structure:
+Current test coverage:
 
 ```
 internal/
-├── cli/
-│   └── cli_test.go
-└── gmail/
-    ├── compose_test.go
-    └── service_test.go
-pkg/
-└── auth/
-    └── auth_test.go
+├── mailer/
+│   └── compose_test.go     # MIME building (plain/HTML/attachments)
+└── calendar/
+    ├── event_test.go       # EventInput.ToEvent(), ApplyPatch(), FindSelfAttendee()
+    └── service_test.go     # ValidateNotify, EventTime, MeetLink, FormatEventLine
 ```
+
+No live network mocking exists for `gmail/v1` or `calendar/v3` (unlike
+outlook-tool's `respx`); tests target pure functions only (MIME/event
+building, formatting, validation). `internal/cli` has no unit tests — verify
+CLI wiring manually via `--help` and against a real account.
 
 ## Skill maintenance (CRITICAL)
 
@@ -280,15 +340,17 @@ binary.
 - [x] Magic file modes extracted to constants
 - [x] OAuth callback race fixed (listener-based, no Sleep)
 - [x] Use `cmd.Context()` instead of `context.Background()`
-- [ ] Add unit tests
+- [x] Add unit tests (pure functions: compose, calendar event building/patching)
 - [ ] Add integration tests
+- [x] Google Calendar support (`cal` command tree, see Command Structure above)
 
 ## Notes for AI
 
 - This is a CLI tool, avoid suggesting web/API frameworks
 - OAuth2 flow requires user browser interaction
-- Gmail API has rate limits, consider batch operations
-- Token refresh is handled automatically by oauth2 library
+- Gmail and Calendar APIs both have rate limits, consider batch operations
+- Token refresh is handled automatically by oauth2 library (same token file/scopes cover both APIs)
+- `cal delete` and `--notify all` are irreversible/user-visible side effects: always confirm with the user first (see skill.md)
 - Always use proper error wrapping with `%w` format
 - Follow Go coding standards defined in golang skill
 - pkg/auth is designed to be duplicated, not shared as a library
